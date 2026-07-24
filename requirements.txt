@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+groq
+google-generativeai
+chromadb
+agno
+python-dotenv
+pyyaml
+requests
