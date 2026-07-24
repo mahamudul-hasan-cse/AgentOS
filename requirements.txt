@@ -7,3 +7,4 @@ agno
 python-dotenv
 pyyaml
 requests
+pytest
