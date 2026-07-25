@@ -9,6 +9,7 @@ dispatcher itself can't be crashed by a misbehaving syscall.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -20,12 +21,20 @@ from kernel.drivers import (
 )
 from kernel.ipc import Blackboard, MessageQueue
 from kernel.memory import PageManager
+from kernel.scheduler import Scheduler
 
 from .types import Syscall, SyscallStatus, SyscallType
 
 # NOTE: kernel.access_control depends on kernel.syscalls.types, so importing it
 # at module load here would create a circular import. It is imported lazily
 # inside the methods below instead.
+
+
+class AgentTerminated(Exception):
+    """Raised inside an LLM_CALL handler when the agent's in-flight call is
+    cancelled by TERMINATE_AGENT. It is an ordinary Exception (not
+    CancelledError) so the dispatcher records a clean ERROR outcome rather than
+    letting cancellation escape and cancel the calling task."""
 
 
 class SyscallDispatcher:
@@ -38,6 +47,7 @@ class SyscallDispatcher:
         access_control: Optional["AccessControl"] = None,
         resource_manager: Optional["ResourceManager"] = None,
         filesystem: Optional["SemanticFS"] = None,
+        scheduler: Optional[Scheduler] = None,
     ):
         # kernel.access_control and kernel.filesystem both depend (transitively)
         # on kernel.syscalls.types, so they are imported lazily here to avoid a
@@ -60,6 +70,11 @@ class SyscallDispatcher:
         self.filesystem = (
             filesystem if filesystem is not None else SemanticFS(access_control=self.acl)
         )
+        # process registry that TERMINATE_AGENT operates on.
+        self.scheduler = scheduler if scheduler is not None else Scheduler()
+        # in-flight LLM_CALL tasks keyed by agent id, so a call can be cancelled
+        # mid-flight (SIGKILL-style). One process runs one call at a time.
+        self._inflight_tasks: Dict[str, asyncio.Task] = {}
         self.log: List[Syscall] = []
         self._handlers: Dict[SyscallType, Callable] = {
             SyscallType.LLM_CALL: self._handle_llm_call,
@@ -72,6 +87,7 @@ class SyscallDispatcher:
             SyscallType.FILE_WRITE: self._handle_file_write,
             SyscallType.FILE_READ: self._handle_file_read,
             SyscallType.FILE_SEARCH: self._handle_file_search,
+            SyscallType.TERMINATE_AGENT: self._handle_terminate_agent,
         }
 
     async def dispatch(self, agent_id: str, syscall_type: SyscallType, **args) -> Syscall:
@@ -92,9 +108,13 @@ class SyscallDispatcher:
                 raise NotImplementedError(
                     f"Syscall '{syscall_type.value}' is not implemented yet"
                 )
-            self.acl.enforce(
-                agent_id, syscall_type, target_agent_id=args.get("target_agent_id")
-            )
+            # For TERMINATE_AGENT the privilege target is the pid being killed;
+            # for MEM_* it's target_agent_id.
+            if syscall_type == SyscallType.TERMINATE_AGENT:
+                acl_target = args.get("pid")
+            else:
+                acl_target = args.get("target_agent_id")
+            self.acl.enforce(agent_id, syscall_type, target_agent_id=acl_target)
             syscall.result = await handler(agent_id, **args)
             syscall.status = SyscallStatus.SUCCESS
         except AccessDenied as e:
@@ -161,16 +181,48 @@ class SyscallDispatcher:
                 )
                 continue
 
+            # Run the actual generation as a cancellable task and track it, so
+            # TERMINATE_AGENT can kill it mid-flight. _run_generate's OWN finally
+            # releases the provider slot, so awaiting the (possibly cancelled)
+            # task guarantees the slot is freed before we move on.
+            inner: asyncio.Task = asyncio.ensure_future(
+                self._run_generate(agent_id, provider, driver_cls, prompt, kwargs)
+            )
+            self._inflight_tasks[agent_id] = inner
             try:
-                text = await driver_cls().generate(prompt, **kwargs)
-                return {"driver_used": driver_cls.name, "text": text}
+                return await inner
             except (RateLimitError, DriverConnectionError) as e:
                 last_error = e
                 continue
+            except asyncio.CancelledError:
+                # our call was terminated; don't fall back to another provider.
+                raise AgentTerminated(
+                    f"LLM_CALL for agent '{agent_id}' was terminated"
+                )
             finally:
-                await self.resource_manager.release(agent_id, provider, units=1)
+                # only clear if a later fallback attempt hasn't replaced it.
+                if self._inflight_tasks.get(agent_id) is inner:
+                    self._inflight_tasks.pop(agent_id, None)
 
         raise last_error or DriverError("No provider was able to serve the LLM_CALL")
+
+    async def _run_generate(
+        self,
+        agent_id: str,
+        provider: str,
+        driver_cls: Any,
+        prompt: str,
+        kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Perform one provider generation, always releasing the provider's
+        rate-limit slot on exit — success, error, OR cancellation. Because this
+        runs as its own task, the release still fires when TERMINATE_AGENT
+        cancels it (the Phase 6 finally-release, verified under cancellation)."""
+        try:
+            text = await driver_cls().generate(prompt, **kwargs)
+            return {"driver_used": driver_cls.name, "text": text}
+        finally:
+            await self.resource_manager.release(agent_id, provider, units=1)
 
     async def _handle_mem_write(
         self,
@@ -273,3 +325,40 @@ class SyscallDispatcher:
             agent_id, query, top_k=top_k, target_agent_id=target_agent_id
         )
         return {"query": query, "results": results}
+
+    async def _handle_terminate_agent(
+        self, agent_id: str, pid: Optional[str] = None, **_
+    ) -> Dict[str, Any]:
+        """SIGKILL a process: cancel its in-flight LLM_CALL (if any) and mark it
+        terminated in the scheduler. `agent_id` is the caller; `pid` is the
+        process being killed (they're the same for self-termination)."""
+        if pid is None:
+            raise ValueError("TERMINATE_AGENT requires a 'pid'")
+
+        cancelled = False
+        task = self._inflight_tasks.get(pid)
+        if task is not None and not task.done():
+            task.cancel()
+            # Await the cancelled task so its finally (slot release) completes
+            # BEFORE we return — verified, not assumed. Awaiting a cancelled
+            # task re-raises CancelledError once the task has fully unwound.
+            try:
+                await task
+            except BaseException:  # noqa: BLE001 — cancellation/errors expected here
+                pass
+            cancelled = True
+
+        process_found = self.scheduler.terminate(pid)
+
+        # Memory decision: we intentionally do NOT release the agent's pages.
+        # In this model, PageManager pages are the agent's persisted conversation
+        # history (backed by ChromaDB swap) — data that outlives a single
+        # execution, like files a killed OS process leaves on disk. Wiping it on
+        # every kill would be destructive and irreversible; a separate explicit
+        # cleanup could purge it if ever desired.
+        return {
+            "pid": pid,
+            "cancelled_llm_call": cancelled,
+            "process_found": process_found,
+            "memory_retained": True,
+        }

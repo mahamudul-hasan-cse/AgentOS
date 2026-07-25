@@ -42,6 +42,9 @@ USER_ALLOWED_SYSCALLS = frozenset(
         SyscallType.FILE_READ,
         SyscallType.FILE_WRITE,
         SyscallType.FILE_SEARCH,
+        # a USER agent may terminate its OWN process; terminating another
+        # agent's process is additionally restricted to KERNEL (see enforce()).
+        SyscallType.TERMINATE_AGENT,
     }
 )
 
@@ -74,9 +77,10 @@ class AccessControl:
     ) -> None:
         """Raise AccessDenied if `agent_id` may not issue `syscall_type`.
 
-        `target_agent_id` is the memory owner for MEM_READ/MEM_WRITE; when it
-        differs from the caller the operation crosses into another agent's
-        memory and requires KERNEL privilege.
+        `target_agent_id` is the memory owner for MEM_READ/MEM_WRITE (or the
+        process being killed for TERMINATE_AGENT); when it differs from the
+        caller the operation crosses into another agent and requires KERNEL
+        privilege.
         """
         if self.registry.is_kernel(agent_id):
             return  # kernel mode: unrestricted
@@ -91,5 +95,13 @@ class AccessControl:
             if target_agent_id is not None and target_agent_id != agent_id:
                 raise AccessDenied(
                     f"USER-level agent '{agent_id}' may not access the memory of "
+                    f"'{target_agent_id}' (requires KERNEL privilege)"
+                )
+
+        if syscall_type == SyscallType.TERMINATE_AGENT:
+            # for termination the "target" is the process/agent id being killed.
+            if target_agent_id is not None and target_agent_id != agent_id:
+                raise AccessDenied(
+                    f"USER-level agent '{agent_id}' may not terminate process "
                     f"'{target_agent_id}' (requires KERNEL privilege)"
                 )

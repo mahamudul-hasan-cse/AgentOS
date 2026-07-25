@@ -13,10 +13,12 @@ from kernel.syscalls import Syscall, SyscallDispatcher, SyscallStatus, SyscallTy
 dispatcher = SyscallDispatcher()
 page_manager = dispatcher.page_manager
 
-# Persistent snapshot of the scheduler for the dashboard: the current process
-# queue plus the most recent /scheduler/gantt timeline. Updated whenever a
-# schedule is run; seeded at startup so the dashboard shows a live example.
-scheduler_state: dict = {"processes": [], "timeline": [], "algorithm": None}
+# The live process queue is `dispatcher.scheduler` (the single source of truth
+# shared with /scheduler/terminate). Only the derived scheduling artifacts — the
+# most recent Gantt timeline and the algorithm that produced it — are cached
+# here for the dashboard; the processes themselves are read live from the
+# scheduler's queue.
+scheduler_state: dict = {"timeline": [], "algorithm": None}
 
 
 def _process_to_dict(p: Process) -> dict:
@@ -50,7 +52,8 @@ def _seed_scheduler_demo() -> None:
     sample[2].state = "ready"
     sample[3].state = "waiting"
 
-    scheduler_state["processes"] = [_process_to_dict(p) for p in sample]
+    # register into the live scheduler so the seeded queue is real (and killable)
+    dispatcher.scheduler.queue = sample
     scheduler_state["timeline"] = [{"pid": s.pid, "start": s.start, "end": s.end} for s in timeline]
     scheduler_state["algorithm"] = "round_robin"
 
@@ -160,21 +163,26 @@ class GanttResponse(BaseModel):
     timeline: list[TimeSliceOut]
 
 
+def _new_process(p: "ProcessIn") -> Process:
+    return Process(
+        pid=p.pid,
+        arrival_time=p.arrival_time,
+        estimated_burst=p.estimated_burst,
+        priority=p.priority,
+    )
+
+
 @app.post("/scheduler/gantt", response_model=GanttResponse)
 def scheduler_gantt(request: GanttRequest) -> GanttResponse:
-    processes = [
-        Process(
-            pid=p.pid,
-            arrival_time=p.arrival_time,
-            estimated_burst=p.estimated_burst,
-            priority=p.priority,
-        )
-        for p in request.processes
-    ]
+    processes = [_new_process(p) for p in request.processes]
 
-    scheduler = Scheduler(processes)
+    # Run the simulation on throwaway copies so the processes we register keep
+    # their pre-run (schedulable) state — the scheduling algorithms mutate
+    # processes to "terminated" as they complete, and we want the live queue to
+    # represent pending processes that can still be inspected and terminated.
+    sim = Scheduler([_new_process(p) for p in request.processes])
     try:
-        timeline = scheduler.run(
+        timeline = sim.run(
             request.algorithm,
             quantum=request.quantum,
             mlfq_quantums=request.mlfq_quantums or DEFAULT_MLFQ_QUANTUMS,
@@ -182,9 +190,11 @@ def scheduler_gantt(request: GanttRequest) -> GanttResponse:
     except UnknownAlgorithmError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    # Register the submitted processes into the dispatcher's scheduler — the
+    # single source of truth that /scheduler/state and /scheduler/terminate read.
+    dispatcher.scheduler.queue = processes
+
     timeline_out = [{"pid": s.pid, "start": s.start, "end": s.end} for s in timeline]
-    # persist for the dashboard: processes are now in their post-run states
-    scheduler_state["processes"] = [_process_to_dict(p) for p in processes]
     scheduler_state["timeline"] = timeline_out
     scheduler_state["algorithm"] = request.algorithm
 
@@ -202,13 +212,32 @@ class SchedulerStateResponse(BaseModel):
 
 @app.get("/scheduler/state", response_model=SchedulerStateResponse)
 def scheduler_state_endpoint() -> SchedulerStateResponse:
-    """Current process queue (pid, state, arrival_time, remaining_burst, ...) and
-    the most recent Gantt timeline, for the dashboard's process table + chart."""
+    """Current process queue (read live from the dispatcher's scheduler) plus the
+    most recent Gantt timeline, for the dashboard's process table + chart. A
+    process terminated via /scheduler/terminate is dropped from the queue here."""
     return SchedulerStateResponse(
         algorithm=scheduler_state["algorithm"],
-        processes=scheduler_state["processes"],
+        processes=[_process_to_dict(p) for p in dispatcher.scheduler.queue],
         timeline=scheduler_state["timeline"],
     )
+
+
+class TerminateResponse(BaseModel):
+    pid: str
+    cancelled_llm_call: bool
+    process_found: bool
+    memory_retained: bool
+
+
+@app.post("/scheduler/terminate/{pid}", response_model=TerminateResponse)
+async def scheduler_terminate(pid: str, agent_id: str | None = None) -> TerminateResponse:
+    """SIGKILL a process: cancel its in-flight LLM_CALL and mark it terminated.
+    `agent_id` is the caller (defaults to the pid itself, i.e. self-termination);
+    terminating another agent's process requires a KERNEL-privileged caller."""
+    caller = agent_id or pid
+    syscall = await dispatcher.dispatch(caller, SyscallType.TERMINATE_AGENT, pid=pid)
+    _raise_for_syscall(syscall)
+    return TerminateResponse(**syscall.result)
 
 
 class MemoryPageOut(BaseModel):

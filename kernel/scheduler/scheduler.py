@@ -30,6 +30,21 @@ class Scheduler:
     def add_process(self, process: Process) -> None:
         self.queue.append(process)
 
+    def terminate(self, pid: str) -> bool:
+        """SIGKILL-style termination: immediately mark any process with this pid
+        as 'terminated' and drop it from the ready/waiting queue. Returns True if
+        a matching process was found. The Process object itself survives (a caller
+        holding a reference sees state == 'terminated'); it is just no longer
+        schedulable."""
+        found = False
+        for process in self.queue:
+            if process.pid == pid:
+                process.state = "terminated"
+                process.remaining_burst = 0.0
+                found = True
+        self.queue = [p for p in self.queue if p.pid != pid]
+        return found
+
     def run(
         self,
         algorithm: str,
