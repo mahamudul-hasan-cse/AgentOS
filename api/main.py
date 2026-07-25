@@ -1,16 +1,90 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agents import run_collaboration
 from kernel.scheduler import DEFAULT_MLFQ_QUANTUMS, Process, Scheduler, UnknownAlgorithmError
 from kernel.syscalls import Syscall, SyscallDispatcher, SyscallStatus, SyscallType
 
-app = FastAPI(title="AgentOS-Lite")
-
 # Single choke point for all agent-kernel interaction. The dispatcher owns the
 # PageManager (memory subsystem) and routes to the driver layer for LLM calls.
 dispatcher = SyscallDispatcher()
 page_manager = dispatcher.page_manager
+
+# Persistent snapshot of the scheduler for the dashboard: the current process
+# queue plus the most recent /scheduler/gantt timeline. Updated whenever a
+# schedule is run; seeded at startup so the dashboard shows a live example.
+scheduler_state: dict = {"processes": [], "timeline": [], "algorithm": None}
+
+
+def _process_to_dict(p: Process) -> dict:
+    return {
+        "pid": p.pid,
+        "state": p.state,
+        "arrival_time": p.arrival_time,
+        "estimated_burst": p.estimated_burst,
+        "remaining_burst": p.remaining_burst,
+        "priority": p.priority,
+    }
+
+
+def _seed_scheduler_demo() -> None:
+    """Seed a representative queue + Gantt timeline so the dashboard's scheduler
+    panels are populated on first load. The displayed queue is a mid-run
+    snapshot showing every state badge; the timeline is a real Round Robin run."""
+    sample = [
+        Process(pid="P1", arrival_time=0, estimated_burst=5, priority=1),
+        Process(pid="P2", arrival_time=1, estimated_burst=3, priority=2),
+        Process(pid="P3", arrival_time=2, estimated_burst=8, priority=0),
+        Process(pid="P4", arrival_time=3, estimated_burst=2, priority=1),
+    ]
+    timeline = Scheduler([Process(pid=p.pid, arrival_time=p.arrival_time,
+                                  estimated_burst=p.estimated_burst, priority=p.priority)
+                          for p in sample]).run("round_robin", quantum=3)
+
+    # a plausible in-flight snapshot so all four state badges are visible
+    sample[0].state, sample[0].remaining_burst = "terminated", 0
+    sample[1].state, sample[1].remaining_burst = "running", 1
+    sample[2].state = "ready"
+    sample[3].state = "waiting"
+
+    scheduler_state["processes"] = [_process_to_dict(p) for p in sample]
+    scheduler_state["timeline"] = [{"pid": s.pid, "start": s.start, "end": s.end} for s in timeline]
+    scheduler_state["algorithm"] = "round_robin"
+
+
+async def _seed_memory_demo() -> None:
+    """Write a few pages for a 'demo' agent through the dispatcher so the memory
+    panel shows RAM-vs-swap and the syscall trace has entries on first load."""
+    for i in range(7):
+        await dispatcher.dispatch(
+            "demo",
+            SyscallType.MEM_WRITE,
+            page_id=f"demo-page-{i}",
+            content=f"Demo conversation chunk {i}: notes about OS scheduling and paging.",
+            token_count=100,
+        )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _seed_scheduler_demo()
+    try:
+        await _seed_memory_demo()
+    except Exception:  # seeding is best-effort; never block startup on it
+        pass
+    yield
+
+
+app = FastAPI(title="AgentOS-Lite", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def _raise_for_syscall(syscall: Syscall) -> None:
@@ -108,9 +182,32 @@ def scheduler_gantt(request: GanttRequest) -> GanttResponse:
     except UnknownAlgorithmError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    timeline_out = [{"pid": s.pid, "start": s.start, "end": s.end} for s in timeline]
+    # persist for the dashboard: processes are now in their post-run states
+    scheduler_state["processes"] = [_process_to_dict(p) for p in processes]
+    scheduler_state["timeline"] = timeline_out
+    scheduler_state["algorithm"] = request.algorithm
+
     return GanttResponse(
         algorithm=request.algorithm,
-        timeline=[TimeSliceOut(pid=s.pid, start=s.start, end=s.end) for s in timeline],
+        timeline=[TimeSliceOut(**s) for s in timeline_out],
+    )
+
+
+class SchedulerStateResponse(BaseModel):
+    algorithm: str | None
+    processes: list[dict]
+    timeline: list[dict]
+
+
+@app.get("/scheduler/state", response_model=SchedulerStateResponse)
+def scheduler_state_endpoint() -> SchedulerStateResponse:
+    """Current process queue (pid, state, arrival_time, remaining_burst, ...) and
+    the most recent Gantt timeline, for the dashboard's process table + chart."""
+    return SchedulerStateResponse(
+        algorithm=scheduler_state["algorithm"],
+        processes=scheduler_state["processes"],
+        timeline=scheduler_state["timeline"],
     )
 
 

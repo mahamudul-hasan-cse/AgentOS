@@ -57,6 +57,26 @@ Start the API server:
 uvicorn api.main:app --reload
 ```
 
+## Dashboard
+
+A Next.js (App Router + TypeScript + Tailwind) dashboard in [`dashboard/`](dashboard/)
+gives a live, terminal-styled view of the kernel: a process table with
+color-coded state badges, a recharts Gantt chart of the last schedule run, a
+memory panel showing pages in RAM vs. swapped to ChromaDB, and a live syscall
+trace. All panels poll the backend every 2 seconds.
+
+Run the FastAPI backend on port 8000, then in a second terminal:
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Open http://localhost:3000. The backend enables CORS for `http://localhost:3000`
+and seeds demo scheduler/memory state on startup so the panels are populated
+immediately. See [`dashboard/README.md`](dashboard/README.md) for details.
+
 ## Roadmap
 
 Remaining phases from `PROJECT_PLAN.md`:
