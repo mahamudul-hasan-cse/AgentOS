@@ -3,6 +3,7 @@ __pycache__/
 kernel/config.yaml
 .env
 chroma_db/
+fs_root/
 
 # dashboard (Next.js)
 dashboard/node_modules/

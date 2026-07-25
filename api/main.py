@@ -101,7 +101,7 @@ def _raise_for_syscall(syscall: Syscall) -> None:
         raise HTTPException(status_code=501, detail=detail)
     if error_type == "ValueError":
         raise HTTPException(status_code=400, detail=detail)
-    if error_type == "KeyError":
+    if error_type in ("KeyError", "FileNotFoundError"):
         raise HTTPException(status_code=404, detail=detail)
     if error_type == "ResourceUnavailable":
         raise HTTPException(status_code=503, detail=detail)
@@ -334,3 +334,92 @@ def resources_state() -> ResourceStateResponse:
     """Per-provider rate-limit pool state: total capacity, current allocation,
     availability, peak usage, and whether the pool is in a safe state."""
     return ResourceStateResponse(providers=dispatcher.resource_manager.state())
+
+
+class FsWriteRequest(BaseModel):
+    agent_id: str
+    filename: str
+    content: str
+    target_agent_id: str | None = None
+
+
+class FsWriteResponse(BaseModel):
+    agent_id: str
+    filename: str
+    path: str
+    created_at: float
+
+
+@app.post("/fs/write", response_model=FsWriteResponse)
+async def fs_write(request: FsWriteRequest) -> FsWriteResponse:
+    syscall = await dispatcher.dispatch(
+        request.agent_id,
+        SyscallType.FILE_WRITE,
+        filename=request.filename,
+        content=request.content,
+        target_agent_id=request.target_agent_id,
+    )
+    _raise_for_syscall(syscall)
+    return FsWriteResponse(**syscall.result)
+
+
+class FsReadResponse(BaseModel):
+    filename: str
+    content: str
+
+
+@app.get("/fs/read", response_model=FsReadResponse)
+async def fs_read(
+    agent_id: str, filename: str, target_agent_id: str | None = None
+) -> FsReadResponse:
+    syscall = await dispatcher.dispatch(
+        agent_id,
+        SyscallType.FILE_READ,
+        filename=filename,
+        target_agent_id=target_agent_id,
+    )
+    _raise_for_syscall(syscall)
+    return FsReadResponse(**syscall.result)
+
+
+class FsSearchRequest(BaseModel):
+    agent_id: str
+    query: str
+    top_k: int = 3
+    target_agent_id: str | None = None
+
+
+class FsSearchResponse(BaseModel):
+    query: str
+    results: list[dict]
+
+
+@app.post("/fs/search", response_model=FsSearchResponse)
+async def fs_search(request: FsSearchRequest) -> FsSearchResponse:
+    """Natural-language file search (approximate — shared-vocabulary similarity;
+    see kernel/filesystem/semantic_fs.py)."""
+    syscall = await dispatcher.dispatch(
+        request.agent_id,
+        SyscallType.FILE_SEARCH,
+        query=request.query,
+        top_k=request.top_k,
+        target_agent_id=request.target_agent_id,
+    )
+    _raise_for_syscall(syscall)
+    return FsSearchResponse(**syscall.result)
+
+
+class FsListResponse(BaseModel):
+    agent_id: str
+    files: list[str]
+
+
+@app.get("/fs/list/{agent_id}", response_model=FsListResponse)
+def fs_list(agent_id: str) -> FsListResponse:
+    """List the files an agent has written. (State read, like /memory/state —
+    not routed as a syscall.)"""
+    try:
+        files = dispatcher.filesystem.list_files(agent_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return FsListResponse(agent_id=agent_id, files=files)
