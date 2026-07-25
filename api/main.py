@@ -21,12 +21,16 @@ def _raise_for_syscall(syscall: Syscall) -> None:
     detail = (syscall.result or {}).get("error", "syscall failed")
     error_type = (syscall.result or {}).get("error_type")
 
+    if syscall.status == SyscallStatus.PERMISSION_DENIED:
+        raise HTTPException(status_code=403, detail=detail)
     if syscall.status == SyscallStatus.NOT_IMPLEMENTED:
         raise HTTPException(status_code=501, detail=detail)
     if error_type == "ValueError":
         raise HTTPException(status_code=400, detail=detail)
     if error_type == "KeyError":
         raise HTTPException(status_code=404, detail=detail)
+    if error_type == "ResourceUnavailable":
+        raise HTTPException(status_code=503, detail=detail)
     raise HTTPException(status_code=502, detail=detail)
 
 
@@ -222,3 +226,14 @@ async def agents_collaborate(request: CollaborateRequest) -> CollaborateResponse
         blackboard=result["blackboard"],
         final_output=result["final_output"],
     )
+
+
+class ResourceStateResponse(BaseModel):
+    providers: dict
+
+
+@app.get("/resources/state", response_model=ResourceStateResponse)
+def resources_state() -> ResourceStateResponse:
+    """Per-provider rate-limit pool state: total capacity, current allocation,
+    availability, peak usage, and whether the pool is in a safe state."""
+    return ResourceStateResponse(providers=dispatcher.resource_manager.state())
