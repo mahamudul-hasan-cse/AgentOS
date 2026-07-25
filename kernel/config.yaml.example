@@ -1,0 +1,15 @@
+groq:
+  api_key: "your-groq-api-key-here"
+  model: "llama-3.1-8b-instant"
+
+gemini:
+  api_key: "your-gemini-api-key-here"
+  model: "gemini-1.5-flash"
+
+deepseek:
+  api_key: "your-deepseek-api-key-here"
+  model: "deepseek-chat"
+
+ollama:
+  host: "http://localhost:11434"
+  model: "llama3"

@@ -24,7 +24,13 @@ venv\Scripts\activate        # Windows
 pip install -r requirements.txt
 ```
 
-Fill in your API keys in `kernel/config.yaml`:
+`kernel/config.yaml` is gitignored (it holds real API keys). Copy the template and fill in your keys:
+
+```bash
+cp kernel/config.yaml.example kernel/config.yaml   # then edit kernel/config.yaml
+```
+
+The file has this structure:
 
 ```yaml
 groq:
