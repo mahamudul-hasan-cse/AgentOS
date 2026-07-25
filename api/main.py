@@ -1,18 +1,39 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from kernel.drivers import DRIVER_REGISTRY, DriverConnectionError, DriverError, RateLimitError
-from kernel.memory import PageManager
 from kernel.scheduler import DEFAULT_MLFQ_QUANTUMS, Process, Scheduler, UnknownAlgorithmError
+from kernel.syscalls import Syscall, SyscallDispatcher, SyscallStatus, SyscallType
 
 app = FastAPI(title="AgentOS-Lite")
-page_manager = PageManager()
+
+# Single choke point for all agent-kernel interaction. The dispatcher owns the
+# PageManager (memory subsystem) and routes to the driver layer for LLM calls.
+dispatcher = SyscallDispatcher()
+page_manager = dispatcher.page_manager
+
+
+def _raise_for_syscall(syscall: Syscall) -> None:
+    """Translate a failed syscall record into an appropriate HTTP error."""
+    if syscall.status == SyscallStatus.SUCCESS:
+        return
+
+    detail = (syscall.result or {}).get("error", "syscall failed")
+    error_type = (syscall.result or {}).get("error_type")
+
+    if syscall.status == SyscallStatus.NOT_IMPLEMENTED:
+        raise HTTPException(status_code=501, detail=detail)
+    if error_type == "ValueError":
+        raise HTTPException(status_code=400, detail=detail)
+    if error_type == "KeyError":
+        raise HTTPException(status_code=404, detail=detail)
+    raise HTTPException(status_code=502, detail=detail)
 
 
 class GenerateRequest(BaseModel):
     prompt: str
     driver: str = "groq"
     model: str | None = None
+    agent_id: str = "user"
 
 
 class GenerateResponse(BaseModel):
@@ -22,36 +43,17 @@ class GenerateResponse(BaseModel):
 
 @app.post("/generate", response_model=GenerateResponse)
 async def generate(request: GenerateRequest) -> GenerateResponse:
-    driver_cls = DRIVER_REGISTRY.get(request.driver)
-    if driver_cls is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown driver '{request.driver}'. Available: {list(DRIVER_REGISTRY)}",
-        )
-
-    kwargs = {"model": request.model} if request.model else {}
-
-    try:
-        driver = driver_cls()
-        text = await driver.generate(request.prompt, **kwargs)
-        return GenerateResponse(driver_used=driver_cls.name, text=text)
-    except (RateLimitError, DriverConnectionError) as primary_error:
-        if request.driver == "ollama":
-            raise HTTPException(status_code=502, detail=str(primary_error)) from primary_error
-        try:
-            fallback = DRIVER_REGISTRY["ollama"]()
-            text = await fallback.generate(request.prompt, **kwargs)
-            return GenerateResponse(driver_used="ollama", text=text)
-        except DriverError as fallback_error:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"Primary driver '{request.driver}' failed: {primary_error}. "
-                    f"Fallback to ollama also failed: {fallback_error}"
-                ),
-            ) from fallback_error
-    except DriverError as e:
-        raise HTTPException(status_code=502, detail=str(e)) from e
+    syscall = await dispatcher.dispatch(
+        request.agent_id,
+        SyscallType.LLM_CALL,
+        prompt=request.prompt,
+        driver=request.driver,
+        model=request.model,
+    )
+    _raise_for_syscall(syscall)
+    return GenerateResponse(
+        driver_used=syscall.result["driver_used"], text=syscall.result["text"]
+    )
 
 
 class ProcessIn(BaseModel):
@@ -128,26 +130,19 @@ class MemoryWriteResponse(BaseModel):
 
 
 @app.post("/memory/write", response_model=MemoryWriteResponse)
-def memory_write(request: MemoryWriteRequest) -> MemoryWriteResponse:
-    try:
-        page, evicted = page_manager.write_page(
-            agent_id=request.agent_id,
-            page_id=request.page_id,
-            content=request.content,
-            token_count=request.token_count,
-            policy=request.policy,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
+async def memory_write(request: MemoryWriteRequest) -> MemoryWriteResponse:
+    syscall = await dispatcher.dispatch(
+        request.agent_id,
+        SyscallType.MEM_WRITE,
+        page_id=request.page_id,
+        content=request.content,
+        token_count=request.token_count,
+        policy=request.policy,
+    )
+    _raise_for_syscall(syscall)
     return MemoryWriteResponse(
-        page=MemoryPageOut(
-            page_id=page.page_id,
-            content=page.content,
-            token_count=page.token_count,
-            last_accessed=page.last_accessed,
-        ),
-        evicted_page_ids=evicted,
+        page=MemoryPageOut(**syscall.result["page"]),
+        evicted_page_ids=syscall.result["evicted_page_ids"],
     )
 
 
@@ -164,21 +159,18 @@ class MemoryQueryResponse(BaseModel):
 
 
 @app.post("/memory/query", response_model=MemoryQueryResponse)
-def memory_query(request: MemoryQueryRequest) -> MemoryQueryResponse:
-    try:
-        result = page_manager.read(request.agent_id, request.query_text, policy=request.policy)
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-
+async def memory_query(request: MemoryQueryRequest) -> MemoryQueryResponse:
+    syscall = await dispatcher.dispatch(
+        request.agent_id,
+        SyscallType.MEM_READ,
+        query_text=request.query_text,
+        policy=request.policy,
+    )
+    _raise_for_syscall(syscall)
     return MemoryQueryResponse(
-        page=MemoryPageOut(
-            page_id=result.page.page_id,
-            content=result.page.content,
-            token_count=result.page.token_count,
-            last_accessed=result.page.last_accessed,
-        ),
-        page_fault=result.page_fault,
-        evicted_page_id=result.evicted_page_id,
+        page=MemoryPageOut(**syscall.result["page"]),
+        page_fault=syscall.result["page_fault"],
+        evicted_page_id=syscall.result["evicted_page_id"],
     )
 
 
@@ -193,3 +185,16 @@ class MemoryStateResponse(BaseModel):
 @app.get("/memory/state/{agent_id}", response_model=MemoryStateResponse)
 def memory_state(agent_id: str) -> MemoryStateResponse:
     return MemoryStateResponse(**page_manager.state(agent_id))
+
+
+class SyscallLogResponse(BaseModel):
+    syscalls: list[dict]
+
+
+@app.get("/syscalls/log", response_model=SyscallLogResponse)
+def syscalls_log(limit: int | None = None) -> SyscallLogResponse:
+    """Return the syscall trace, most recent first, for the dashboard's live
+    strace-style view. Pass ?limit=N to cap the number of entries."""
+    return SyscallLogResponse(
+        syscalls=[s.as_dict() for s in dispatcher.get_log(limit)]
+    )
