@@ -24,7 +24,8 @@ export interface SchedulerState {
 
 export interface MemoryPage {
   page_id: string;
-  content: string;
+  /** omitted by replay snapshots, which store page identity only */
+  content?: string;
   token_count: number;
   last_accessed?: number | null;
 }

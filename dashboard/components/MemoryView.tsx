@@ -5,6 +5,7 @@ import { useState } from "react";
 import { fetchMemoryState, MemoryPage } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { Panel } from "./Panel";
+import { HistoryBadge, useTimeTravel } from "./TimeTravelContext";
 
 function PageCard({ page, tone }: { page: MemoryPage; tone: "ram" | "swap" }) {
   const border = tone === "ram" ? "border-emerald-500/30" : "border-slate-600/40";
@@ -20,7 +21,9 @@ function PageCard({ page, tone }: { page: MemoryPage; tone: "ram" | "swap" }) {
           {page.token_count}t
         </span>
       </div>
-      <p className="mt-0.5 truncate text-xs text-slate-500">{page.content}</p>
+      {page.content && (
+        <p className="mt-0.5 truncate text-xs text-slate-500">{page.content}</p>
+      )}
     </div>
   );
 }
@@ -32,14 +35,31 @@ export function MemoryView() {
     2000,
     agentId
   );
+  const { isLive, snapshot } = useTimeTravel();
+
+  // in history mode, pull this agent's memory out of the snapshot
+  const historical = snapshot?.memory?.[agentId];
+  const ramPages: MemoryPage[] = isLive
+    ? data?.ram_pages ?? []
+    : historical?.ram_pages ?? [];
+  const swappedPages: MemoryPage[] = isLive
+    ? data?.swapped_pages ?? []
+    : historical?.swapped_pages ?? [];
+  const tokensUsed = isLive ? data?.ram_tokens_used : historical?.ram_tokens_used;
+  const tokenBudget = isLive ? data?.ram_budget_tokens : historical?.ram_budget_tokens;
+  const hasData = isLive ? Boolean(data) : Boolean(historical);
 
   return (
     <Panel
       title="Memory View"
       subtitle={
-        data ? `${data.ram_tokens_used} / ${data.ram_budget_tokens} tokens` : "—"
+        tokensUsed !== undefined && tokensUsed !== null
+          ? `${tokensUsed} / ${tokenBudget ?? "?"} tokens`
+          : "—"
       }
     >
+      {!isLive && <HistoryBadge label={snapshot?.label} />}
+
       <div className="mb-3 flex items-center gap-2">
         <label className="text-xs text-slate-500">agent_id</label>
         <input
@@ -50,31 +70,36 @@ export function MemoryView() {
         />
       </div>
 
-      {error && <p className="text-xs text-rose-400">error: {error}</p>}
+      {isLive && error && <p className="text-xs text-rose-400">error: {error}</p>}
+      {!isLive && !historical && (
+        <p className="text-xs text-slate-500">
+          agent &apos;{agentId}&apos; had no memory at this point in history
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <div>
           <h3 className="mb-2 text-xs uppercase tracking-wider text-emerald-400">
-            In RAM ({data?.ram_pages.length ?? 0})
+            In RAM ({ramPages.length})
           </h3>
           <div className="space-y-1.5">
-            {(data?.ram_pages ?? []).map((p) => (
+            {ramPages.map((p) => (
               <PageCard key={p.page_id} page={p} tone="ram" />
             ))}
-            {data && data.ram_pages.length === 0 && (
+            {hasData && ramPages.length === 0 && (
               <p className="text-xs text-slate-600">empty</p>
             )}
           </div>
         </div>
         <div>
           <h3 className="mb-2 text-xs uppercase tracking-wider text-slate-400">
-            Swapped → ChromaDB ({data?.swapped_pages.length ?? 0})
+            Swapped → ChromaDB ({swappedPages.length})
           </h3>
           <div className="space-y-1.5">
-            {(data?.swapped_pages ?? []).map((p) => (
+            {swappedPages.map((p) => (
               <PageCard key={p.page_id} page={p} tone="swap" />
             ))}
-            {data && data.swapped_pages.length === 0 && (
+            {hasData && swappedPages.length === 0 && (
               <p className="text-xs text-slate-600">empty</p>
             )}
           </div>

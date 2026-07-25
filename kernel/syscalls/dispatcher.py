@@ -49,12 +49,16 @@ class SyscallDispatcher:
         filesystem: Optional["SemanticFS"] = None,
         scheduler: Optional[Scheduler] = None,
         quota_manager: Optional["QuotaManager"] = None,
+        recorder: Optional["StateRecorder"] = None,
+        record_state: bool = True,
     ):
         # kernel.access_control and kernel.filesystem both depend (transitively)
         # on kernel.syscalls.types, so they are imported lazily here to avoid a
-        # circular import at module load.
+        # circular import at module load. kernel.replay is lazy for the same
+        # reason (the recorder observes this dispatcher).
         from kernel.access_control import AccessControl, QuotaManager, ResourceManager
         from kernel.filesystem import SemanticFS
+        from kernel.replay import StateRecorder
 
         self.page_manager = page_manager if page_manager is not None else PageManager()
         self.driver_registry = (
@@ -79,6 +83,13 @@ class SyscallDispatcher:
         # in-flight LLM_CALL tasks keyed by agent id, so a call can be cancelled
         # mid-flight (SIGKILL-style). One process runs one call at a time.
         self._inflight_tasks: Dict[str, asyncio.Task] = {}
+        # time-travel replay: snapshots kernel state automatically as syscalls
+        # flow through, so agents need do nothing. Pass record_state=False to
+        # disable (e.g. for a lightweight embedded dispatcher).
+        if recorder is not None:
+            self.recorder: Optional[StateRecorder] = recorder
+        else:
+            self.recorder = StateRecorder(self) if record_state else None
         self.log: List[Syscall] = []
         self._handlers: Dict[SyscallType, Callable] = {
             SyscallType.LLM_CALL: self._handle_llm_call,
@@ -137,6 +148,11 @@ class SyscallDispatcher:
         finally:
             syscall.latency_ms = (time.perf_counter() - start) * 1000.0
             self.log.append(syscall)
+            if self.recorder is not None:
+                try:
+                    self.recorder.observe(syscall)
+                except Exception:  # noqa: BLE001 — recording must never break a syscall
+                    pass
         return syscall
 
     def get_log(self, limit: Optional[int] = None) -> List[Syscall]:

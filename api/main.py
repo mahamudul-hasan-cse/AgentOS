@@ -376,6 +376,56 @@ def resources_state() -> ResourceStateResponse:
     return ResourceStateResponse(providers=dispatcher.resource_manager.state())
 
 
+class TimelineResponse(BaseModel):
+    snapshots: list[dict]
+
+
+@app.get("/replay/timeline", response_model=TimelineResponse)
+def replay_timeline() -> TimelineResponse:
+    """All recorded snapshots (id, timestamp, label, triggering syscall), oldest
+    first — the data behind the dashboard's time-travel scrubber."""
+    if dispatcher.recorder is None:
+        return TimelineResponse(snapshots=[])
+    return TimelineResponse(snapshots=dispatcher.recorder.timeline())
+
+
+class SnapshotResponse(BaseModel):
+    snapshot_id: int
+    timestamp: float
+    syscall_id: str | None
+    label: str
+    processes: list[dict]
+    memory: dict
+    resources: dict
+    quotas: dict
+
+
+@app.get("/replay/snapshot/{snapshot_id}", response_model=SnapshotResponse)
+def replay_snapshot(snapshot_id: int) -> SnapshotResponse:
+    """Full kernel state at the moment this snapshot was taken."""
+    if dispatcher.recorder is None:
+        raise HTTPException(status_code=404, detail="state recording is disabled")
+    snapshot = dispatcher.recorder.get(snapshot_id)
+    if snapshot is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"snapshot {snapshot_id} not found (evicted from the ring buffer or never taken)",
+        )
+    return SnapshotResponse(**snapshot.as_dict())
+
+
+@app.get("/replay/diff/{id_a}/{id_b}")
+def replay_diff(id_a: int, id_b: int) -> dict:
+    """What changed between two snapshots: processes added/removed/state-changed,
+    pages moved between RAM and swap, and resource/quota deltas."""
+    if dispatcher.recorder is None:
+        raise HTTPException(status_code=404, detail="state recording is disabled")
+    try:
+        return dispatcher.recorder.diff(id_a, id_b)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e).strip("'")) from e
+
+
 class QuotaUsageResponse(BaseModel):
     agent_id: str
     pages_used: int

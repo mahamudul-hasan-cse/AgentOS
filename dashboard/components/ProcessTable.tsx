@@ -3,18 +3,26 @@
 import { fetchSchedulerState } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { Panel, StateBadge } from "./Panel";
+import { HistoryBadge, useTimeTravel } from "./TimeTravelContext";
 
 export function ProcessTable() {
   const { data, error } = usePolling(fetchSchedulerState, 2000);
-  const processes = data?.processes ?? [];
+  const { isLive, snapshot } = useTimeTravel();
+
+  // when scrubbed into the past, render the snapshot's queue instead of live state
+  const processes = isLive ? data?.processes ?? [] : snapshot?.processes ?? [];
+  const showError = isLive && error;
 
   return (
     <Panel
       title="Process Table"
-      subtitle={data?.algorithm ? `algorithm: ${data.algorithm}` : "—"}
+      subtitle={
+        isLive ? (data?.algorithm ? `algorithm: ${data.algorithm}` : "—") : "historical"
+      }
     >
-      {error && <p className="text-xs text-rose-400">backend unreachable: {error}</p>}
-      {!error && processes.length === 0 && (
+      {!isLive && <HistoryBadge label={snapshot?.label} />}
+      {showError && <p className="text-xs text-rose-400">backend unreachable: {error}</p>}
+      {!showError && processes.length === 0 && (
         <p className="text-xs text-slate-500">no processes in the queue</p>
       )}
       {processes.length > 0 && (
