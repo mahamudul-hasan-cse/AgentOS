@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from agents import run_collaboration
 from kernel.scheduler import DEFAULT_MLFQ_QUANTUMS, Process, Scheduler, UnknownAlgorithmError
 from kernel.syscalls import Syscall, SyscallDispatcher, SyscallStatus, SyscallType
 
@@ -197,4 +198,27 @@ def syscalls_log(limit: int | None = None) -> SyscallLogResponse:
     strace-style view. Pass ?limit=N to cap the number of entries."""
     return SyscallLogResponse(
         syscalls=[s.as_dict() for s in dispatcher.get_log(limit)]
+    )
+
+
+class CollaborateRequest(BaseModel):
+    topic: str
+    driver: str = "groq"
+
+
+class CollaborateResponse(BaseModel):
+    topic: str
+    blackboard: dict
+    final_output: str
+
+
+@app.post("/agents/collaborate", response_model=CollaborateResponse)
+async def agents_collaborate(request: CollaborateRequest) -> CollaborateResponse:
+    """Run the ResearcherAgent then the WriterAgent over the shared blackboard,
+    returning the intermediate blackboard content and the Writer's final output."""
+    result = await run_collaboration(dispatcher, request.topic, driver=request.driver)
+    return CollaborateResponse(
+        topic=result["topic"],
+        blackboard=result["blackboard"],
+        final_output=result["final_output"],
     )
