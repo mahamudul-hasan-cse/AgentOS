@@ -48,11 +48,12 @@ class SyscallDispatcher:
         resource_manager: Optional["ResourceManager"] = None,
         filesystem: Optional["SemanticFS"] = None,
         scheduler: Optional[Scheduler] = None,
+        quota_manager: Optional["QuotaManager"] = None,
     ):
         # kernel.access_control and kernel.filesystem both depend (transitively)
         # on kernel.syscalls.types, so they are imported lazily here to avoid a
         # circular import at module load.
-        from kernel.access_control import AccessControl, ResourceManager
+        from kernel.access_control import AccessControl, QuotaManager, ResourceManager
         from kernel.filesystem import SemanticFS
 
         self.page_manager = page_manager if page_manager is not None else PageManager()
@@ -65,6 +66,9 @@ class SyscallDispatcher:
         self.resource_manager = (
             resource_manager if resource_manager is not None else ResourceManager()
         )
+        # per-agent quotas (memory pages + LLM call rate), layered on top of the
+        # per-provider resource pools.
+        self.quota_manager = quota_manager if quota_manager is not None else QuotaManager()
         # the filesystem shares this dispatcher's AccessControl so per-agent file
         # scoping uses the same privilege registry as syscall enforcement.
         self.filesystem = (
@@ -88,10 +92,11 @@ class SyscallDispatcher:
             SyscallType.FILE_READ: self._handle_file_read,
             SyscallType.FILE_SEARCH: self._handle_file_search,
             SyscallType.TERMINATE_AGENT: self._handle_terminate_agent,
+            SyscallType.SET_QUOTA: self._handle_set_quota,
         }
 
     async def dispatch(self, agent_id: str, syscall_type: SyscallType, **args) -> Syscall:
-        from kernel.access_control import AccessDenied
+        from kernel.access_control import AccessDenied, QuotaExceeded
 
         syscall_type = SyscallType(syscall_type)
         syscall = Syscall.create(agent_id, syscall_type, dict(args))
@@ -120,6 +125,9 @@ class SyscallDispatcher:
         except AccessDenied as e:
             syscall.status = SyscallStatus.PERMISSION_DENIED
             syscall.result = {"error": str(e), "error_type": "PermissionDenied"}
+        except QuotaExceeded as e:
+            syscall.status = SyscallStatus.QUOTA_EXCEEDED
+            syscall.result = {"error": str(e), "error_type": "QuotaExceeded"}
         except NotImplementedError as e:
             syscall.status = SyscallStatus.NOT_IMPLEMENTED
             syscall.result = {"error": str(e), "error_type": "NotImplementedError"}
@@ -149,7 +157,20 @@ class SyscallDispatcher:
         max_claim: Optional[int] = None,
         **_,
     ) -> Dict[str, Any]:
-        from kernel.access_control import ResourceUnavailable
+        from kernel.access_control import QuotaExceeded, ResourceUnavailable
+
+        # Per-agent call-rate quota. Checked once per LLM_CALL (not per provider
+        # attempt, so a provider fallback doesn't double-count one call). ACL
+        # already ran in dispatch(). We fail fast with QUOTA_EXCEEDED rather than
+        # queueing: the LLM_CALL pipeline below never blocks/waits — it fails
+        # fast and falls back — so blocking here would be out of character.
+        if not self.quota_manager.try_consume_call(agent_id):
+            usage = self.quota_manager.usage(agent_id)
+            raise QuotaExceeded(
+                f"agent '{agent_id}' exceeded its LLM call-rate quota "
+                f"({usage['calls_in_window']}/{usage['max_calls_per_minute']} calls "
+                f"in the last {int(usage['window_seconds'])}s)"
+            )
 
         kwargs = {"model": model} if model else {}
 
@@ -234,10 +255,21 @@ class SyscallDispatcher:
         target_agent_id: Optional[str] = None,
         **_,
     ) -> Dict[str, Any]:
+        from kernel.access_control import QuotaExceeded
+
         owner = target_agent_id or agent_id
+        # per-agent page quota — checked before the write so an over-quota agent
+        # gets QUOTA_EXCEEDED and no page is written.
+        if not self.quota_manager.can_write_page(owner, page_id):
+            usage = self.quota_manager.usage(owner)
+            raise QuotaExceeded(
+                f"agent '{owner}' has reached its memory page quota "
+                f"({usage['pages_used']}/{usage['max_pages']} pages)"
+            )
         page, evicted = self.page_manager.write_page(
             owner, page_id, content, token_count=token_count, policy=policy
         )
+        self.quota_manager.record_page(owner, page_id)
         return {
             "page": {
                 "page_id": page.page_id,
@@ -362,3 +394,21 @@ class SyscallDispatcher:
             "process_found": process_found,
             "memory_retained": True,
         }
+
+    async def _handle_set_quota(
+        self,
+        agent_id: str,
+        target_agent_id: Optional[str] = None,
+        max_pages: Optional[int] = None,
+        max_calls_per_minute: Optional[int] = None,
+        **_,
+    ) -> Dict[str, Any]:
+        """Adjust an agent's quota. SET_QUOTA is not in USER_ALLOWED_SYSCALLS, so
+        access control already restricted this to KERNEL callers before we got
+        here (a USER caller was rejected with PERMISSION_DENIED). `agent_id` is
+        the KERNEL caller; `target_agent_id` is the agent being configured."""
+        target = target_agent_id or agent_id
+        self.quota_manager.set_quota(
+            target, max_pages=max_pages, max_calls_per_minute=max_calls_per_minute
+        )
+        return self.quota_manager.usage(target)

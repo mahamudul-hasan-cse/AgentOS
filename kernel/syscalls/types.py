@@ -29,6 +29,7 @@ class SyscallType(str, Enum):
     BLACKBOARD_READ = "BLACKBOARD_READ"
     BLACKBOARD_WRITE = "BLACKBOARD_WRITE"
     FILE_SEARCH = "FILE_SEARCH"
+    SET_QUOTA = "SET_QUOTA"
 
 
 class SyscallStatus(str, Enum):
@@ -37,6 +38,7 @@ class SyscallStatus(str, Enum):
     ERROR = "error"
     NOT_IMPLEMENTED = "not_implemented"
     PERMISSION_DENIED = "permission_denied"
+    QUOTA_EXCEEDED = "quota_exceeded"
 
 
 @dataclass

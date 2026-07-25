@@ -71,8 +71,17 @@ async def _seed_memory_demo() -> None:
         )
 
 
+# A built-in KERNEL-privileged admin identity so the KERNEL-only endpoints
+# (e.g. POST /quotas) are usable out of the box; non-admin callers are still
+# rejected by access control.
+ADMIN_AGENT_ID = "root"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from kernel.access_control import AgentPrivilege
+
+    dispatcher.acl.registry.register(ADMIN_AGENT_ID, AgentPrivilege.KERNEL)
     _seed_scheduler_demo()
     try:
         await _seed_memory_demo()
@@ -100,6 +109,8 @@ def _raise_for_syscall(syscall: Syscall) -> None:
 
     if syscall.status == SyscallStatus.PERMISSION_DENIED:
         raise HTTPException(status_code=403, detail=detail)
+    if syscall.status == SyscallStatus.QUOTA_EXCEEDED:
+        raise HTTPException(status_code=429, detail=detail)
     if syscall.status == SyscallStatus.NOT_IMPLEMENTED:
         raise HTTPException(status_code=501, detail=detail)
     if error_type == "ValueError":
@@ -363,6 +374,43 @@ def resources_state() -> ResourceStateResponse:
     """Per-provider rate-limit pool state: total capacity, current allocation,
     availability, peak usage, and whether the pool is in a safe state."""
     return ResourceStateResponse(providers=dispatcher.resource_manager.state())
+
+
+class QuotaUsageResponse(BaseModel):
+    agent_id: str
+    pages_used: int
+    max_pages: int
+    calls_in_window: int
+    max_calls_per_minute: int
+    window_seconds: float
+
+
+@app.get("/quotas/{agent_id}", response_model=QuotaUsageResponse)
+def get_quota(agent_id: str) -> QuotaUsageResponse:
+    """Current usage vs. limit for an agent's memory-page and LLM call-rate quotas."""
+    return QuotaUsageResponse(**dispatcher.quota_manager.usage(agent_id))
+
+
+class QuotaUpdateRequest(BaseModel):
+    max_pages: int | None = None
+    max_calls_per_minute: int | None = None
+
+
+@app.post("/quotas/{agent_id}", response_model=QuotaUsageResponse)
+async def set_quota(
+    agent_id: str, request: QuotaUpdateRequest, caller: str = ADMIN_AGENT_ID
+) -> QuotaUsageResponse:
+    """Adjust an agent's quota (KERNEL-only). `caller` is the acting agent and
+    defaults to the built-in admin identity; a non-KERNEL caller is rejected."""
+    syscall = await dispatcher.dispatch(
+        caller,
+        SyscallType.SET_QUOTA,
+        target_agent_id=agent_id,
+        max_pages=request.max_pages,
+        max_calls_per_minute=request.max_calls_per_minute,
+    )
+    _raise_for_syscall(syscall)
+    return QuotaUsageResponse(**syscall.result)
 
 
 class FsWriteRequest(BaseModel):
