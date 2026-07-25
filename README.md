@@ -1,6 +1,6 @@
 # AIOS
 
-AIOS is an **LLM Agent Operating System simulator** built for an Operating Systems course. It reimagines classic OS concepts — process scheduling, virtual memory/paging, syscalls, IPC, and access control — as the management layer for LLM agents, treating each agent request as a process and the LLM context window as physical RAM.
+AIOS is an **LLM Agent Operating System simulator** built for an Operating Systems. It reimagines classic OS concepts — process scheduling, virtual memory/paging, syscalls, IPC, and access control — as the management layer for LLM agents, treating each agent request as a process and the LLM context window as physical RAM.
 
 This project is inspired by [agiresearch/AIOS](https://github.com/agiresearch/AIOS) as an architectural reference, but is independently designed and implemented from scratch.
 
