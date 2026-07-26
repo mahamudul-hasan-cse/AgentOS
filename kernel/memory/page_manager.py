@@ -7,6 +7,14 @@ replacement policy) to ChromaDB, which acts as swap storage. A page fault
 occurs when a query references content no longer in RAM: the page-fault
 handler searches the swap store by embedding similarity (this is RAG,
 reframed as OS-style paging) and loads the best match back into RAM.
+
+How semantic that similarity really is depends on the active embedding
+backend (see kernel/memory/embeddings.py). With the default OllamaEmbedder it
+is genuinely semantic — real learned embeddings, so a page can be retrieved by
+meaning even when it shares no words with the query. If Ollama is unreachable
+the kernel falls back to HashingEmbedder, where similarity degrades to shared
+vocabulary only; Semantic-LRU still works, but "semantic" is then approximate.
+The backend in use is logged at startup.
 """
 
 from __future__ import annotations
@@ -15,7 +23,13 @@ import time
 from collections import OrderedDict, defaultdict
 from typing import Dict, List, Optional, Tuple
 
-from .embeddings import DEFAULT_CHROMA_PATH, embed_text, estimate_tokens, get_chroma_client
+from .embeddings import (
+    DEFAULT_CHROMA_PATH,
+    collection_name,
+    embed_text,
+    estimate_tokens,
+    get_chroma_client,
+)
 from .page_manager_types import Page, ReadResult
 from .replacement import select_victim
 
@@ -36,11 +50,13 @@ class PageManager:
         self.ram: Dict[str, "OrderedDict[str, Page]"] = defaultdict(OrderedDict)
 
         self.client = get_chroma_client(chroma_path)
+        # collections are namespaced by embedding backend + dimension, so
+        # switching backends never collides with a dimension-locked collection
         self.ram_collection = self.client.get_or_create_collection(
-            "ram_pages", metadata=COSINE_SPACE_METADATA
+            collection_name("ram_pages"), metadata=COSINE_SPACE_METADATA
         )
         self.swap_collection = self.client.get_or_create_collection(
-            "swap_pages", metadata=COSINE_SPACE_METADATA
+            collection_name("swap_pages"), metadata=COSINE_SPACE_METADATA
         )
 
     def ram_tokens(self, agent_id: str) -> int:

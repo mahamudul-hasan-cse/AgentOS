@@ -5,12 +5,13 @@ and simultaneously indexed into a dedicated ChromaDB collection so they can be
 retrieved by natural-language query, not just by exact filename — a small
 version of AIOS's LSFS idea.
 
-IMPORTANT — "semantic" here is approximate. The embeddings come from Phase 3's
-hashing-trick bag-of-words vectorizer (kernel/memory/embeddings.py), not a
-trained language model, so similarity reflects **shared vocabulary** between
-the query and a file's content rather than true meaning. A query ranks a file
-highly when they use overlapping words. Same honest caveat as the memory
-manager; swap in a real embedding model to make it genuinely semantic.
+How semantic the search really is depends on the active embedding backend
+(kernel/memory/embeddings.py). With the default OllamaEmbedder it is genuinely
+semantic: real learned embeddings from a local model, so a file can be found by
+meaning even when the query shares no words with its content. If Ollama is
+unreachable the kernel falls back to HashingEmbedder, whose similarity reflects
+only **shared vocabulary** — search still works, but ranks by word overlap
+rather than meaning. The backend actually in use is logged at startup.
 
 Access is scoped per-agent: an agent only sees/searches its own files unless it
 holds KERNEL privilege (checked via the Phase 6 AccessControl), in which case it
@@ -25,7 +26,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from kernel.access_control import AccessControl, AccessDenied
-from kernel.memory.embeddings import DEFAULT_CHROMA_PATH, embed_text, get_chroma_client
+from kernel.memory.embeddings import (
+    DEFAULT_CHROMA_PATH,
+    collection_name,
+    embed_text,
+    get_chroma_client,
+)
 
 DEFAULT_FS_ROOT = str(Path(__file__).resolve().parent.parent.parent / "fs_root")
 COLLECTION_NAME = "fs_files"
@@ -45,7 +51,8 @@ class SemanticFS:
         self.root.mkdir(parents=True, exist_ok=True)
         self.client = get_chroma_client(chroma_path)
         self.collection = self.client.get_or_create_collection(
-            COLLECTION_NAME, metadata=COSINE_SPACE_METADATA
+            # namespaced by embedding backend + dimension (see embeddings.py)
+            collection_name(COLLECTION_NAME), metadata=COSINE_SPACE_METADATA
         )
 
     # --- access + path helpers -------------------------------------------

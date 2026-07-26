@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -77,10 +78,29 @@ async def _seed_memory_demo() -> None:
 ADMIN_AGENT_ID = "root"
 
 
+def _log_embedding_backend() -> None:
+    """Announce which embedding backend is actually in use.
+
+    Routed through uvicorn's own logger because uvicorn does not surface INFO
+    records from arbitrary module loggers — without this the choice between
+    real (Ollama) and approximate (hashing) embeddings would be invisible at
+    startup, which is exactly the ambiguity we want to avoid."""
+    from kernel.memory import get_embedder
+
+    log = logging.getLogger("uvicorn.error")
+    if not log.handlers and not logging.getLogger().handlers:
+        logging.basicConfig(level=logging.INFO)
+    try:
+        log.info("embeddings: active backend -> %s", get_embedder().describe())
+    except Exception as exc:  # noqa: BLE001 — never block startup on logging
+        log.warning("embeddings: could not determine active backend: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from kernel.access_control import AgentPrivilege
 
+    _log_embedding_backend()
     dispatcher.acl.registry.register(ADMIN_AGENT_ID, AgentPrivilege.KERNEL)
     _seed_scheduler_demo()
     try:
@@ -523,8 +543,9 @@ class FsSearchResponse(BaseModel):
 
 @app.post("/fs/search", response_model=FsSearchResponse)
 async def fs_search(request: FsSearchRequest) -> FsSearchResponse:
-    """Natural-language file search (approximate — shared-vocabulary similarity;
-    see kernel/filesystem/semantic_fs.py)."""
+    """Natural-language file search. Genuinely semantic when the Ollama
+    embedding backend is active; falls back to shared-vocabulary similarity if
+    it is unavailable (see kernel/memory/embeddings.py)."""
     syscall = await dispatcher.dispatch(
         request.agent_id,
         SyscallType.FILE_SEARCH,

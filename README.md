@@ -50,12 +50,15 @@ ollama:
   model: "llama3"
 ```
 
-Make sure [Ollama](https://ollama.com) is running locally with a pulled model (used as the offline/fallback driver):
+Make sure [Ollama](https://ollama.com) is running locally with a pulled model (used as the offline/fallback driver), plus an embedding model used by the memory manager and semantic file system:
 
 ```bash
 ollama serve
-ollama pull llama3
+ollama pull llama3             # offline/fallback LLM driver
+ollama pull nomic-embed-text   # real semantic embeddings
 ```
+
+The embedding model is optional: without it the kernel automatically falls back to a built-in hashing embedder, so a fresh clone works offline with zero setup — but similarity then reflects shared vocabulary rather than meaning. Whichever backend is active is logged at startup.
 
 Start the API server:
 

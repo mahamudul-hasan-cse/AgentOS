@@ -13,3 +13,16 @@ deepseek:
 ollama:
   host: "http://localhost:11434"
   model: "llama3"
+
+# Text-embedding backend used by the memory manager (Semantic-LRU, page faults)
+# and the semantic file system.
+#   backend: ollama  -> real learned embeddings from a local Ollama model.
+#                       Requires: ollama pull nomic-embed-text
+#   backend: hashing -> offline fallback, no setup; similarity reflects shared
+#                       vocabulary only, NOT meaning.
+# With backend "ollama", the kernel falls back to hashing automatically if
+# Ollama is unreachable. The backend actually in use is logged at startup.
+embeddings:
+  backend: "ollama"
+  model: "nomic-embed-text"
+  # host: "http://localhost:11434"   # optional; defaults to ollama.host above
