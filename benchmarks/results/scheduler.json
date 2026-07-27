@@ -1,0 +1,149 @@
+{
+  "benchmark": "scheduler",
+  "parameters": {
+    "seed": 20260726,
+    "num_processes": 24,
+    "max_arrival_time": 40,
+    "num_priority_levels": 4,
+    "round_robin_quantum": 4.0,
+    "mlfq_quantums": [
+      4.0,
+      8.0,
+      16.0
+    ]
+  },
+  "profiles": {
+    "uniform": {
+      "description": "all bursts drawn from a narrow band (5-8): the homogeneous baseline",
+      "workload": {
+        "num_processes": 24,
+        "total_burst": 152.0,
+        "mean_burst": 6.333,
+        "max_burst": 8.0,
+        "min_burst": 5.0
+      },
+      "algorithms": {
+        "fcfs": {
+          "avg_waiting_time": 55.375,
+          "avg_turnaround_time": 61.708,
+          "avg_response_time": 55.375,
+          "throughput": 0.1579,
+          "context_switches": 23,
+          "makespan": 152.0
+        },
+        "round_robin": {
+          "avg_waiting_time": 87.542,
+          "avg_turnaround_time": 93.875,
+          "avg_response_time": 36.208,
+          "throughput": 0.1579,
+          "context_switches": 47,
+          "makespan": 152.0
+        },
+        "priority": {
+          "avg_waiting_time": 55.667,
+          "avg_turnaround_time": 62.0,
+          "avg_response_time": 55.667,
+          "throughput": 0.1579,
+          "context_switches": 23,
+          "makespan": 152.0
+        },
+        "mlfq": {
+          "avg_waiting_time": 101.375,
+          "avg_turnaround_time": 107.708,
+          "avg_response_time": 27.458,
+          "throughput": 0.1579,
+          "context_switches": 47,
+          "makespan": 152.0
+        }
+      }
+    },
+    "mixed_short_long": {
+      "description": "bimodal - 70% short jobs (1-4), 30% long jobs (15-25)",
+      "workload": {
+        "num_processes": 24,
+        "total_burst": 208.0,
+        "mean_burst": 8.667,
+        "max_burst": 25.0,
+        "min_burst": 1.0
+      },
+      "algorithms": {
+        "fcfs": {
+          "avg_waiting_time": 77.458,
+          "avg_turnaround_time": 86.125,
+          "avg_response_time": 77.458,
+          "throughput": 0.1154,
+          "context_switches": 23,
+          "makespan": 208.0
+        },
+        "round_robin": {
+          "avg_waiting_time": 61.542,
+          "avg_turnaround_time": 70.208,
+          "avg_response_time": 22.208,
+          "throughput": 0.1154,
+          "context_switches": 60,
+          "makespan": 208.0
+        },
+        "priority": {
+          "avg_waiting_time": 81.625,
+          "avg_turnaround_time": 90.292,
+          "avg_response_time": 81.625,
+          "throughput": 0.1154,
+          "context_switches": 23,
+          "makespan": 208.0
+        },
+        "mlfq": {
+          "avg_waiting_time": 54.375,
+          "avg_turnaround_time": 63.042,
+          "avg_response_time": 13.875,
+          "throughput": 0.1154,
+          "context_switches": 39,
+          "makespan": 208.0
+        }
+      }
+    },
+    "heavy_tailed": {
+      "description": "most jobs tiny (1-3), a few dominate (40-60): Pareto-like",
+      "workload": {
+        "num_processes": 24,
+        "total_burst": 194.0,
+        "mean_burst": 8.083,
+        "max_burst": 57.0,
+        "min_burst": 1.0
+      },
+      "algorithms": {
+        "fcfs": {
+          "avg_waiting_time": 70.208,
+          "avg_turnaround_time": 78.292,
+          "avg_response_time": 70.208,
+          "throughput": 0.1237,
+          "context_switches": 23,
+          "makespan": 194.0
+        },
+        "round_robin": {
+          "avg_waiting_time": 25.875,
+          "avg_turnaround_time": 33.958,
+          "avg_response_time": 13.875,
+          "throughput": 0.1237,
+          "context_switches": 59,
+          "makespan": 194.0
+        },
+        "priority": {
+          "avg_waiting_time": 66.125,
+          "avg_turnaround_time": 74.208,
+          "avg_response_time": 66.125,
+          "throughput": 0.1237,
+          "context_switches": 23,
+          "makespan": 194.0
+        },
+        "mlfq": {
+          "avg_waiting_time": 16.833,
+          "avg_turnaround_time": 24.917,
+          "avg_response_time": 7.208,
+          "throughput": 0.1237,
+          "context_switches": 29,
+          "makespan": 194.0
+        }
+      }
+    }
+  }
+}

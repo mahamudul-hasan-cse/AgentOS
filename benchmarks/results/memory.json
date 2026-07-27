@@ -1,0 +1,839 @@
+{
+  "benchmark": "memory",
+  "parameters": {
+    "base_seed": 20260726,
+    "num_seeds": 10,
+    "seeds": [
+      20260726,
+      20260727,
+      20260728,
+      20260729,
+      20260730,
+      20260731,
+      20260732,
+      20260733,
+      20260734,
+      20260735
+    ],
+    "num_pages": 20,
+    "topics": [
+      "photosynthesis",
+      "cpu_scheduling",
+      "ocean_tides",
+      "bread_baking"
+    ],
+    "pages_per_topic": 5,
+    "tokens_per_page": 10,
+    "ram_budget_tokens": 50,
+    "pages_resident_at_once": 5,
+    "accesses_per_trace": 120,
+    "loop_working_set": 8,
+    "embedder": "CachingEmbedder (nomic-embed-text, 768-dim, real learned embeddings)",
+    "embeddings_are_semantic": true,
+    "seed_varies": "page/priming order (corpus) and access ordering; the hand-written paraphrase queries are fixed by construction"
+  },
+  "paraphrase_lexical_baseline": {
+    "mean_jaccard_overlap": 0.0094,
+    "max_jaccard_overlap": 0.0667,
+    "total_shared_words": 3,
+    "mean_shared_words_per_pair": 0.15,
+    "lexical_top1_accuracy": 0.0
+  },
+  "traces": {
+    "sequential": {
+      "description": "walks every page in order, repeatedly",
+      "queries": "exact page text",
+      "unique_pages_touched_mean": 20.0,
+      "policies": {
+        "fifo": {
+          "page_fault_rate": {
+            "mean": 1.0,
+            "std": 0.0,
+            "min": 1.0,
+            "max": 1.0
+          },
+          "hit_ratio": {
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "per_seed_page_fault_rate": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 20.0,
+          "page_faults_mean": 120.0
+        },
+        "lru": {
+          "page_fault_rate": {
+            "mean": 1.0,
+            "std": 0.0,
+            "min": 1.0,
+            "max": 1.0
+          },
+          "hit_ratio": {
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "per_seed_page_fault_rate": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 20.0,
+          "page_faults_mean": 120.0
+        },
+        "semantic_lru": {
+          "page_fault_rate": {
+            "mean": 0.94,
+            "std": 0.0179,
+            "min": 0.9,
+            "max": 0.9583
+          },
+          "hit_ratio": {
+            "mean": 0.06,
+            "std": 0.0179,
+            "min": 0.0417,
+            "max": 0.1
+          },
+          "per_seed_page_fault_rate": [
+            0.95,
+            0.925,
+            0.95,
+            0.9,
+            0.9583,
+            0.925,
+            0.9417,
+            0.95,
+            0.95,
+            0.95
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 20.0,
+          "page_faults_mean": 112.8
+        },
+        "random": {
+          "page_fault_rate": {
+            "mean": 0.9858,
+            "std": 0.0097,
+            "min": 0.975,
+            "max": 1.0
+          },
+          "hit_ratio": {
+            "mean": 0.0142,
+            "std": 0.0097,
+            "min": 0.0,
+            "max": 0.025
+          },
+          "per_seed_page_fault_rate": [
+            0.975,
+            0.9833,
+            0.9833,
+            0.9917,
+            0.975,
+            1.0,
+            1.0,
+            0.9833,
+            0.975,
+            0.9917
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 20.0,
+          "page_faults_mean": 118.3
+        }
+      },
+      "semantic_vs_lru": {
+        "baseline": "lru",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": 0.06,
+        "std_of_paired_differences": 0.0179,
+        "seeds_challenger_better": 10,
+        "seeds_challenger_worse": 0,
+        "seeds_tied": 0,
+        "margin_between_means": 0.06,
+        "baseline_std": 0.0,
+        "margin_exceeds_baseline_std": true,
+        "improvement_exceeds_paired_std": true
+      },
+      "semantic_vs_random": {
+        "baseline": "random",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": 0.0458,
+        "std_of_paired_differences": 0.0243,
+        "seeds_challenger_better": 10,
+        "seeds_challenger_worse": 0,
+        "seeds_tied": 0,
+        "margin_between_means": 0.0458,
+        "baseline_std": 0.0097,
+        "margin_exceeds_baseline_std": true,
+        "improvement_exceeds_paired_std": true
+      }
+    },
+    "random": {
+      "description": "uniformly random page ids (seeded)",
+      "queries": "exact page text",
+      "unique_pages_touched_mean": 20.0,
+      "policies": {
+        "fifo": {
+          "page_fault_rate": {
+            "mean": 0.7542,
+            "std": 0.0458,
+            "min": 0.6667,
+            "max": 0.8083
+          },
+          "hit_ratio": {
+            "mean": 0.2458,
+            "std": 0.0458,
+            "min": 0.1917,
+            "max": 0.3333
+          },
+          "per_seed_page_fault_rate": [
+            0.75,
+            0.8,
+            0.6667,
+            0.7,
+            0.75,
+            0.8083,
+            0.7833,
+            0.8,
+            0.7417,
+            0.7417
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 20.0,
+          "page_faults_mean": 90.5
+        },
+        "lru": {
+          "page_fault_rate": {
+            "mean": 0.7642,
+            "std": 0.0497,
+            "min": 0.675,
+            "max": 0.8333
+          },
+          "hit_ratio": {
+            "mean": 0.2358,
+            "std": 0.0497,
+            "min": 0.1667,
+            "max": 0.325
+          },
+          "per_seed_page_fault_rate": [
+            0.7917,
+            0.8,
+            0.675,
+            0.6917,
+            0.7667,
+            0.8333,
+            0.7917,
+            0.7833,
+            0.775,
+            0.7333
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 20.0,
+          "page_faults_mean": 91.7
+        },
+        "semantic_lru": {
+          "page_fault_rate": {
+            "mean": 0.7517,
+            "std": 0.0351,
+            "min": 0.675,
+            "max": 0.8
+          },
+          "hit_ratio": {
+            "mean": 0.2483,
+            "std": 0.0351,
+            "min": 0.2,
+            "max": 0.325
+          },
+          "per_seed_page_fault_rate": [
+            0.7417,
+            0.7417,
+            0.7417,
+            0.675,
+            0.775,
+            0.8,
+            0.7667,
+            0.775,
+            0.775,
+            0.725
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 20.0,
+          "page_faults_mean": 90.2
+        },
+        "random": {
+          "page_fault_rate": {
+            "mean": 0.745,
+            "std": 0.0488,
+            "min": 0.65,
+            "max": 0.825
+          },
+          "hit_ratio": {
+            "mean": 0.255,
+            "std": 0.0488,
+            "min": 0.175,
+            "max": 0.35
+          },
+          "per_seed_page_fault_rate": [
+            0.7333,
+            0.7417,
+            0.65,
+            0.725,
+            0.7667,
+            0.825,
+            0.7833,
+            0.7833,
+            0.7417,
+            0.7
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 20.0,
+          "page_faults_mean": 89.4
+        }
+      },
+      "semantic_vs_lru": {
+        "baseline": "lru",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": 0.0125,
+        "std_of_paired_differences": 0.035,
+        "seeds_challenger_better": 7,
+        "seeds_challenger_worse": 2,
+        "seeds_tied": 1,
+        "margin_between_means": 0.0125,
+        "baseline_std": 0.0497,
+        "margin_exceeds_baseline_std": false,
+        "improvement_exceeds_paired_std": false
+      },
+      "semantic_vs_random": {
+        "baseline": "random",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": -0.0067,
+        "std_of_paired_differences": 0.0384,
+        "seeds_challenger_better": 4,
+        "seeds_challenger_worse": 5,
+        "seeds_tied": 1,
+        "margin_between_means": -0.0067,
+        "baseline_std": 0.0488,
+        "margin_exceeds_baseline_std": false,
+        "improvement_exceeds_paired_std": false
+      }
+    },
+    "looping": {
+      "description": "cycles over 8 pages > RAM capacity (classic LRU worst case)",
+      "queries": "exact page text",
+      "unique_pages_touched_mean": 8.0,
+      "policies": {
+        "fifo": {
+          "page_fault_rate": {
+            "mean": 1.0,
+            "std": 0.0,
+            "min": 1.0,
+            "max": 1.0
+          },
+          "hit_ratio": {
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "per_seed_page_fault_rate": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 8.0,
+          "page_faults_mean": 120.0
+        },
+        "lru": {
+          "page_fault_rate": {
+            "mean": 1.0,
+            "std": 0.0,
+            "min": 1.0,
+            "max": 1.0
+          },
+          "hit_ratio": {
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0
+          },
+          "per_seed_page_fault_rate": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 8.0,
+          "page_faults_mean": 120.0
+        },
+        "semantic_lru": {
+          "page_fault_rate": {
+            "mean": 0.8008,
+            "std": 0.0794,
+            "min": 0.65,
+            "max": 0.8917
+          },
+          "hit_ratio": {
+            "mean": 0.1992,
+            "std": 0.0794,
+            "min": 0.1083,
+            "max": 0.35
+          },
+          "per_seed_page_fault_rate": [
+            0.775,
+            0.65,
+            0.8833,
+            0.7583,
+            0.7667,
+            0.8917,
+            0.7667,
+            0.8833,
+            0.875,
+            0.7583
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 8.0,
+          "page_faults_mean": 96.1
+        },
+        "random": {
+          "page_fault_rate": {
+            "mean": 0.6875,
+            "std": 0.0258,
+            "min": 0.6417,
+            "max": 0.725
+          },
+          "hit_ratio": {
+            "mean": 0.3125,
+            "std": 0.0258,
+            "min": 0.275,
+            "max": 0.3583
+          },
+          "per_seed_page_fault_rate": [
+            0.6417,
+            0.6833,
+            0.6917,
+            0.725,
+            0.6667,
+            0.7,
+            0.6667,
+            0.6833,
+            0.725,
+            0.6917
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 8.0,
+          "page_faults_mean": 82.5
+        }
+      },
+      "semantic_vs_lru": {
+        "baseline": "lru",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": 0.1992,
+        "std_of_paired_differences": 0.0794,
+        "seeds_challenger_better": 10,
+        "seeds_challenger_worse": 0,
+        "seeds_tied": 0,
+        "margin_between_means": 0.1992,
+        "baseline_std": 0.0,
+        "margin_exceeds_baseline_std": true,
+        "improvement_exceeds_paired_std": true
+      },
+      "semantic_vs_random": {
+        "baseline": "random",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": -0.1133,
+        "std_of_paired_differences": 0.076,
+        "seeds_challenger_better": 1,
+        "seeds_challenger_worse": 9,
+        "seeds_tied": 0,
+        "margin_between_means": -0.1133,
+        "baseline_std": 0.0258,
+        "margin_exceeds_baseline_std": true,
+        "improvement_exceeds_paired_std": true
+      }
+    },
+    "clustered": {
+      "description": "dwells within one topic, then switches - semantic locality",
+      "queries": "exact page text",
+      "unique_pages_touched_mean": 19.9,
+      "policies": {
+        "fifo": {
+          "page_fault_rate": {
+            "mean": 0.48,
+            "std": 0.0465,
+            "min": 0.375,
+            "max": 0.525
+          },
+          "hit_ratio": {
+            "mean": 0.52,
+            "std": 0.0465,
+            "min": 0.475,
+            "max": 0.625
+          },
+          "per_seed_page_fault_rate": [
+            0.4417,
+            0.525,
+            0.4917,
+            0.5,
+            0.4583,
+            0.375,
+            0.5167,
+            0.525,
+            0.4667,
+            0.5
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 19.9,
+          "page_faults_mean": 57.6
+        },
+        "lru": {
+          "page_fault_rate": {
+            "mean": 0.4725,
+            "std": 0.047,
+            "min": 0.3667,
+            "max": 0.525
+          },
+          "hit_ratio": {
+            "mean": 0.5275,
+            "std": 0.047,
+            "min": 0.475,
+            "max": 0.6333
+          },
+          "per_seed_page_fault_rate": [
+            0.4333,
+            0.525,
+            0.5083,
+            0.475,
+            0.4583,
+            0.3667,
+            0.5083,
+            0.5083,
+            0.4583,
+            0.4833
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 19.9,
+          "page_faults_mean": 56.7
+        },
+        "semantic_lru": {
+          "page_fault_rate": {
+            "mean": 0.4583,
+            "std": 0.0441,
+            "min": 0.375,
+            "max": 0.5083
+          },
+          "hit_ratio": {
+            "mean": 0.5416,
+            "std": 0.0441,
+            "min": 0.4917,
+            "max": 0.625
+          },
+          "per_seed_page_fault_rate": [
+            0.4,
+            0.5083,
+            0.4667,
+            0.4667,
+            0.425,
+            0.375,
+            0.4917,
+            0.4917,
+            0.4667,
+            0.4917
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 19.9,
+          "page_faults_mean": 55.0
+        },
+        "random": {
+          "page_fault_rate": {
+            "mean": 0.5342,
+            "std": 0.0348,
+            "min": 0.4667,
+            "max": 0.575
+          },
+          "hit_ratio": {
+            "mean": 0.4658,
+            "std": 0.0348,
+            "min": 0.425,
+            "max": 0.5333
+          },
+          "per_seed_page_fault_rate": [
+            0.4667,
+            0.575,
+            0.5167,
+            0.55,
+            0.525,
+            0.4917,
+            0.5667,
+            0.5583,
+            0.5333,
+            0.5583
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 1.0,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 19.9,
+          "page_faults_mean": 64.1
+        }
+      },
+      "semantic_vs_lru": {
+        "baseline": "lru",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": 0.0141,
+        "std_of_paired_differences": 0.0184,
+        "seeds_challenger_better": 7,
+        "seeds_challenger_worse": 3,
+        "seeds_tied": 0,
+        "margin_between_means": 0.0141,
+        "baseline_std": 0.047,
+        "margin_exceeds_baseline_std": false,
+        "improvement_exceeds_paired_std": false
+      },
+      "semantic_vs_random": {
+        "baseline": "random",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": 0.0758,
+        "std_of_paired_differences": 0.0194,
+        "seeds_challenger_better": 10,
+        "seeds_challenger_worse": 0,
+        "seeds_tied": 0,
+        "margin_between_means": 0.0758,
+        "baseline_std": 0.0348,
+        "margin_exceeds_baseline_std": true,
+        "improvement_exceeds_paired_std": true
+      }
+    },
+    "paraphrased": {
+      "description": "same access order as 'clustered', but queried by hand-written paraphrases with minimal word overlap - only meaning can match",
+      "queries": "paraphrase",
+      "unique_pages_touched_mean": 19.9,
+      "policies": {
+        "fifo": {
+          "page_fault_rate": {
+            "mean": 0.3808,
+            "std": 0.0401,
+            "min": 0.3083,
+            "max": 0.425
+          },
+          "hit_ratio": {
+            "mean": 0.6192,
+            "std": 0.0401,
+            "min": 0.575,
+            "max": 0.6917
+          },
+          "per_seed_page_fault_rate": [
+            0.35,
+            0.425,
+            0.4167,
+            0.35,
+            0.4,
+            0.3083,
+            0.425,
+            0.375,
+            0.35,
+            0.4083
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 0.6075,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 15.9,
+          "page_faults_mean": 45.7
+        },
+        "lru": {
+          "page_fault_rate": {
+            "mean": 0.3717,
+            "std": 0.0431,
+            "min": 0.2833,
+            "max": 0.4167
+          },
+          "hit_ratio": {
+            "mean": 0.6283,
+            "std": 0.0431,
+            "min": 0.5833,
+            "max": 0.7167
+          },
+          "per_seed_page_fault_rate": [
+            0.325,
+            0.4083,
+            0.4167,
+            0.35,
+            0.3833,
+            0.2833,
+            0.4167,
+            0.3833,
+            0.3583,
+            0.3917
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 0.6075,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 15.9,
+          "page_faults_mean": 44.6
+        },
+        "semantic_lru": {
+          "page_fault_rate": {
+            "mean": 0.3733,
+            "std": 0.0442,
+            "min": 0.3,
+            "max": 0.45
+          },
+          "hit_ratio": {
+            "mean": 0.6267,
+            "std": 0.0442,
+            "min": 0.55,
+            "max": 0.7
+          },
+          "per_seed_page_fault_rate": [
+            0.3167,
+            0.3917,
+            0.45,
+            0.3333,
+            0.3917,
+            0.3,
+            0.3917,
+            0.3833,
+            0.3833,
+            0.3917
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 0.6075,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 15.9,
+          "page_faults_mean": 44.8
+        },
+        "random": {
+          "page_fault_rate": {
+            "mean": 0.4125,
+            "std": 0.0424,
+            "min": 0.3583,
+            "max": 0.4833
+          },
+          "hit_ratio": {
+            "mean": 0.5875,
+            "std": 0.0424,
+            "min": 0.5167,
+            "max": 0.6417
+          },
+          "per_seed_page_fault_rate": [
+            0.375,
+            0.4833,
+            0.4667,
+            0.4,
+            0.4,
+            0.3583,
+            0.45,
+            0.3667,
+            0.4083,
+            0.4167
+          ],
+          "avg_pages_in_ram_mean": 5.0,
+          "retrieval_accuracy_mean": 0.6075,
+          "topic_match_rate_mean": 1.0,
+          "distinct_pages_retrieved_mean": 15.9,
+          "page_faults_mean": 49.5
+        }
+      },
+      "semantic_vs_lru": {
+        "baseline": "lru",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": -0.0017,
+        "std_of_paired_differences": 0.0192,
+        "seeds_challenger_better": 4,
+        "seeds_challenger_worse": 4,
+        "seeds_tied": 2,
+        "margin_between_means": -0.0017,
+        "baseline_std": 0.0431,
+        "margin_exceeds_baseline_std": false,
+        "improvement_exceeds_paired_std": false
+      },
+      "semantic_vs_random": {
+        "baseline": "random",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": 0.0392,
+        "std_of_paired_differences": 0.0326,
+        "seeds_challenger_better": 9,
+        "seeds_challenger_worse": 1,
+        "seeds_tied": 0,
+        "margin_between_means": 0.0392,
+        "baseline_std": 0.0424,
+        "margin_exceeds_baseline_std": false,
+        "improvement_exceeds_paired_std": true
+      }
+    }
+  }
+}
