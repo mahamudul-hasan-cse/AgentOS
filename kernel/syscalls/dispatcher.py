@@ -104,7 +104,10 @@ class SyscallDispatcher:
             SyscallType.FILE_SEARCH: self._handle_file_search,
             SyscallType.TERMINATE_AGENT: self._handle_terminate_agent,
             SyscallType.SET_QUOTA: self._handle_set_quota,
+            SyscallType.SPAWN_AGENT: self._handle_spawn_agent,
+            SyscallType.WAIT: self._handle_wait,
         }
+        self._spawn_counter = 0
 
     async def dispatch(self, agent_id: str, syscall_type: SyscallType, **args) -> Syscall:
         from kernel.access_control import AccessDenied, QuotaExceeded
@@ -374,29 +377,54 @@ class SyscallDispatcher:
         )
         return {"query": query, "results": results}
 
+    async def _cancel_inflight(self, pid: str) -> bool:
+        task = self._inflight_tasks.get(pid)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        # Await the cancelled task so its finally (slot release) completes
+        # BEFORE we return — verified, not assumed. Awaiting a cancelled
+        # task re-raises CancelledError once the task has fully unwound.
+        try:
+            await task
+        except BaseException:  # noqa: BLE001 — cancellation/errors expected here
+            pass
+        return True
+
     async def _handle_terminate_agent(
-        self, agent_id: str, pid: Optional[str] = None, **_
+        self,
+        agent_id: str,
+        pid: Optional[str] = None,
+        tree: bool = False,
+        exit_status: int = 0,
+        **_,
     ) -> Dict[str, Any]:
         """SIGKILL a process: cancel its in-flight LLM_CALL (if any) and mark it
         terminated in the scheduler. `agent_id` is the caller; `pid` is the
-        process being killed (they're the same for self-termination)."""
+        process being killed (they're the same for self-termination).
+
+        With `tree=True` the whole subtree goes (kill_tree). By default children
+        SURVIVE and are reparented to init — see Scheduler.terminate."""
         if pid is None:
             raise ValueError("TERMINATE_AGENT requires a 'pid'")
 
-        cancelled = False
-        task = self._inflight_tasks.get(pid)
-        if task is not None and not task.done():
-            task.cancel()
-            # Await the cancelled task so its finally (slot release) completes
-            # BEFORE we return — verified, not assumed. Awaiting a cancelled
-            # task re-raises CancelledError once the task has fully unwound.
-            try:
-                await task
-            except BaseException:  # noqa: BLE001 — cancellation/errors expected here
-                pass
-            cancelled = True
+        if tree:
+            targets = [p.pid for p in self.scheduler.descendants(pid)] + [pid]
+            cancelled_pids = [t for t in targets if await self._cancel_inflight(t)]
+            killed = self.scheduler.kill_tree(pid, exit_status=exit_status)
+            return {
+                "pid": pid,
+                "tree": True,
+                "killed": killed,
+                "cancelled_llm_calls": cancelled_pids,
+                "process_found": bool(killed),
+                "cancelled_llm_call": bool(cancelled_pids),
+                "memory_retained": True,
+            }
 
-        process_found = self.scheduler.terminate(pid)
+        cancelled = await self._cancel_inflight(pid)
+        result = self.scheduler.terminate(pid, exit_status=exit_status)
+        process_found = result["found"]
 
         # Memory decision: we intentionally do NOT release the agent's pages.
         # In this model, PageManager pages are the agent's persisted conversation
@@ -409,6 +437,84 @@ class SyscallDispatcher:
             "cancelled_llm_call": cancelled,
             "process_found": process_found,
             "memory_retained": True,
+            # a child with a live non-init parent lingers until that parent
+            # reaps it with WAIT
+            "zombie": result["zombie"],
+            "exit_status": result.get("exit_status"),
+            "reparented_to_init": result["reparented"],
+            "reaped_zombie_children": result["reaped"],
+        }
+
+    async def _handle_spawn_agent(
+        self,
+        agent_id: str,
+        pid: Optional[str] = None,
+        privilege: Optional[str] = None,
+        estimated_burst: float = 0.0,
+        priority: int = 0,
+        **_,
+    ) -> Dict[str, Any]:
+        """fork(): create a child process owned by the calling agent.
+
+        The child inherits the caller's privilege level unless a lower one is
+        requested. Requesting a HIGHER level is privilege escalation and is
+        refused — a USER agent can never obtain a KERNEL child.
+        """
+        from kernel.access_control import AccessDenied, AgentPrivilege
+
+        caller_privilege = self.acl.registry.privilege(agent_id)
+        if privilege is None:
+            child_privilege = caller_privilege
+        else:
+            child_privilege = AgentPrivilege(privilege)
+            if (
+                child_privilege == AgentPrivilege.KERNEL
+                and caller_privilege != AgentPrivilege.KERNEL
+            ):
+                raise AccessDenied(
+                    f"USER-level agent '{agent_id}' may not spawn a KERNEL child "
+                    f"(privilege escalation)"
+                )
+
+        if pid is None:
+            self._spawn_counter += 1
+            pid = f"{agent_id}-child-{self._spawn_counter}"
+
+        self.scheduler.ensure_init()
+        child = self.scheduler.spawn(
+            pid=pid,
+            parent_pid=agent_id,
+            estimated_burst=estimated_burst,
+            priority=priority,
+        )
+        self.acl.registry.register(pid, child_privilege)
+        # The child gets its OWN quota at the defaults rather than sharing or
+        # inheriting the parent's; touching usage() materialises that entry.
+        self.quota_manager.usage(pid)
+
+        return {
+            "pid": child.pid,
+            "parent_pid": child.parent_pid,
+            "privilege": child_privilege.value,
+            "state": child.state,
+            "priority": child.priority,
+        }
+
+    async def _handle_wait(
+        self, agent_id: str, pid: Optional[str] = None, **_
+    ) -> Dict[str, Any]:
+        """wait(): reap one of the caller's zombie children and read its exit
+        status, which finally removes it from the process table. `pid` selects a
+        specific child; omitted, any zombie child is reaped. A caller can only
+        ever reap its own children — reap() matches on parent_pid."""
+        reaped = self.scheduler.reap(agent_id, child_pid=pid)
+        if reaped is None:
+            return {"reaped": False, "pid": pid, "exit_status": None}
+        return {
+            "reaped": True,
+            "pid": reaped.pid,
+            "exit_status": reaped.exit_status,
+            "parent_pid": agent_id,
         }
 
     async def _handle_set_quota(

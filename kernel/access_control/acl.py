@@ -45,6 +45,15 @@ USER_ALLOWED_SYSCALLS = frozenset(
         # a USER agent may terminate its OWN process; terminating another
         # agent's process is additionally restricted to KERNEL (see enforce()).
         SyscallType.TERMINATE_AGENT,
+        # A USER agent may fork a child, but only at its own privilege level:
+        # privilege ESCALATION (a USER requesting a KERNEL child) is rejected by
+        # the SPAWN_AGENT handler, which is the only place the requested level is
+        # known. Spawning is how any agent delegates work, so forbidding it
+        # outright would make the hierarchy a kernel-only feature.
+        SyscallType.SPAWN_AGENT,
+        # wait(): reaping is inherently scoped to the caller's own children, so
+        # no extra check is needed here.
+        SyscallType.WAIT,
     }
 )
 

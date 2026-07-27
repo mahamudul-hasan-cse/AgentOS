@@ -103,10 +103,20 @@ def test_user_can_still_access_own_memory(tmp_path):
     assert syscall.status == SyscallStatus.SUCCESS
 
 
-def test_enforce_denies_spawn_agent_for_user():
+def test_user_may_issue_spawn_agent_but_not_escalate():
+    """SPAWN_AGENT is permitted at the ACL layer for USER agents: forking a
+    child is how any agent delegates work. What a USER may NOT do is request a
+    KERNEL child — that is privilege escalation, and it is enforced by the
+    SPAWN_AGENT handler (the only place the requested level is known), covered
+    by test_user_cannot_spawn_kernel_child in tests/test_process_tree.py."""
+    acl = AccessControl()
+    acl.enforce("someone", SyscallType.SPAWN_AGENT)  # must not raise
+
+
+def test_enforce_still_denies_genuinely_kernel_only_syscalls():
     acl = AccessControl()
     with pytest.raises(Exception):
-        acl.enforce("someone", SyscallType.SPAWN_AGENT)
+        acl.enforce("someone", SyscallType.SET_QUOTA)
 
 
 # --- Resource manager / Banker's Algorithm -------------------------------

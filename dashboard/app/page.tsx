@@ -1,6 +1,7 @@
 import { GanttChart } from "@/components/GanttChart";
 import { MemoryView } from "@/components/MemoryView";
 import { ProcessTable } from "@/components/ProcessTable";
+import { ProcessTree } from "@/components/ProcessTree";
 import { SyscallTrace } from "@/components/SyscallTrace";
 import { TimeTravel } from "@/components/TimeTravel";
 import { TimeTravelProvider } from "@/components/TimeTravelContext";
@@ -29,6 +30,7 @@ export default function Home() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <ProcessTable />
           <GanttChart />
+          <ProcessTree />
           <MemoryView />
           <SyscallTrace />
         </div>

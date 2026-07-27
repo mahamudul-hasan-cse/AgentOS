@@ -29,13 +29,16 @@ python shell/repl.py --agent alice                    # act as a USER-level agen
 |--------------------|-----------------------------------|------------------------------------------|
 | `ps`               | `GET /scheduler/state`            | process table (PID/STATE/ARRIVAL/…)      |
 | `top`              | `GET /scheduler/state` + `/resources/state` | auto-refresh every 2s (Ctrl+C to stop) |
-| `kill <pid>`       | `POST /scheduler/terminate/{pid}` | terminate a process                      |
+| `kill [-t] <pid>`  | `POST /scheduler/terminate/{pid}` | terminate a process (`-t` = whole subtree)|
 | `limits [agent]`   | `GET /quotas/{agent}`             | quota usage vs limit (pages + call rate) |
 | `ls [agent]`       | `GET /fs/list/{agent}`            | list an agent's files                    |
 | `cat <filename>`   | `GET /fs/read`                    | print a file's contents                  |
 | `find <query>`     | `POST /fs/search`                 | natural-language semantic file search    |
 | `mem <agent>`      | `GET /memory/state/{agent}`       | RAM pages vs pages swapped to ChromaDB   |
 | `strace [n]`       | `GET /syscalls/log?limit=n`       | recent syscalls (default 20)             |
+| `pstree`           | `GET /scheduler/tree`             | process hierarchy as an ASCII tree       |
+| `spawn [pid]`      | `POST /scheduler/spawn`           | fork a child process                     |
+| `wait <p> [child]` | `POST /scheduler/wait/{pid}`      | reap a zombie child, read its exit status|
 | `run <prompt>`     | `POST /generate`                  | issue an LLM_CALL, shows serving driver  |
 | `help`             | —                                 | list commands                            |
 | `exit` / `quit`    | —                                 | leave the shell                          |
@@ -97,3 +100,4 @@ permission denied: USER-level agent 'mallory' may not terminate process 'P1' (re
 Errors are always printed as a clean one-liner — `403 → permission denied`,
 `429 → quota exceeded`, `404 → not found` — never a raw traceback.
 ```
+

@@ -25,7 +25,12 @@ class Process:
     arrival_time: float
     estimated_burst: float
     priority: int = 0
-    state: str = "waiting"  # waiting | ready | running | terminated
+    state: str = "waiting"  # waiting | ready | running | zombie | terminated
+    # Parent in the process hierarchy. None means no parent (a root process);
+    # every other process descends from the "init" process. A terminated child
+    # lingers as a `zombie` holding `exit_status` until its parent reaps it.
+    parent_pid: Optional[str] = None
+    exit_status: Optional[int] = None
     remaining_burst: float = field(init=False)
 
     def __post_init__(self) -> None:

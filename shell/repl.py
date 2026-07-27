@@ -121,11 +121,23 @@ def _clear_screen() -> None:
 # Command handlers — each takes (ctx, args) and prints its own output
 # --------------------------------------------------------------------------
 
+PS_HEADERS = ["PID", "PPID", "STATE", "ARRIVAL", "REMAINING", "PRIO", "EXIT"]
+
+
 def _process_rows(state: dict) -> List[List[object]]:
-    return [
-        [p["pid"], p["state"], p["arrival_time"], p["remaining_burst"], p["priority"]]
-        for p in state.get("processes", [])
-    ]
+    rows = []
+    for p in state.get("processes", []):
+        exit_status = p.get("exit_status")
+        rows.append([
+            p["pid"],
+            p.get("parent_pid") or "-",
+            p["state"] + (" <defunct>" if p["state"] == "zombie" else ""),
+            p["arrival_time"],
+            p["remaining_burst"],
+            p["priority"],
+            "-" if exit_status is None else exit_status,
+        ])
+    return rows
 
 
 def handle_ps(ctx: Context, args: List[str]) -> None:
@@ -134,7 +146,66 @@ def handle_ps(ctx: Context, args: List[str]) -> None:
     if not rows:
         print("no processes in the queue")
         return
-    print(format_table(["PID", "STATE", "ARRIVAL", "REMAINING", "PRIO"], rows))
+    print(format_table(PS_HEADERS, rows))
+    zombies = sum(1 for p in state.get("processes", []) if p["state"] == "zombie")
+    if zombies:
+        print(
+            f"\n{zombies} zombie process(es) awaiting reap "
+            f"(a parent clears one with: wait <parent> <child>)"
+        )
+
+
+def handle_pstree(ctx: Context, args: List[str]) -> None:
+    """Render the process hierarchy with ASCII indentation, like pstree(1)."""
+    tree = api(ctx, "GET", "/scheduler/tree")
+    if not tree:
+        print("no process tree (is the backend seeded?)")
+        return
+
+    def label(node: dict) -> str:
+        state = node.get("state", "?")
+        if state == "zombie":
+            exit_status = node.get("exit_status")
+            suffix = "" if exit_status is None else f" exit={exit_status}"
+            return f"{node['pid']}  [zombie <defunct>{suffix}]"
+        return f"{node['pid']}  ({state})"
+
+    def walk(node: dict, prefix: str = "", is_last: bool = True, root: bool = True) -> None:
+        if root:
+            print(label(node))
+        else:
+            print(f"{prefix}{'`-- ' if is_last else '|-- '}{label(node)}")
+            prefix += "    " if is_last else "|   "
+        children = node.get("children", [])
+        for i, child in enumerate(children):
+            walk(child, prefix, i == len(children) - 1, root=False)
+
+    walk(tree)
+
+
+def handle_wait(ctx: Context, args: List[str]) -> None:
+    """wait <parent> [child] — reap a zombie child and read its exit status."""
+    parent = args[0]
+    child = args[1] if len(args) > 1 else None
+    params = {"child_pid": child} if child else {}
+    result = api(ctx, "POST", f"/scheduler/wait/{parent}", params=params)
+    if not result.get("reaped"):
+        target = f" '{child}'" if child else ""
+        print(f"no zombie child{target} to reap for '{parent}'")
+        return
+    print(f"reaped '{result['pid']}' (exit status {result['exit_status']})")
+
+
+def handle_spawn(ctx: Context, args: List[str]) -> None:
+    """spawn [pid] — fork a child process owned by the shell's agent."""
+    payload = {"agent_id": ctx.agent}
+    if args:
+        payload["pid"] = args[0]
+    result = api(ctx, "POST", "/scheduler/spawn", json=payload)
+    print(
+        f"spawned '{result['pid']}' (parent={result['parent_pid']}, "
+        f"privilege={result['privilege']})"
+    )
 
 
 def _resource_header(ctx: Context) -> str:
@@ -156,7 +227,7 @@ def handle_top(ctx: Context, args: List[str]) -> None:
             _clear_screen()
             print(f"AgentOS-Lite  {time.strftime('%H:%M:%S')}   {header}\n")
             if rows:
-                print(format_table(["PID", "STATE", "ARRIVAL", "REMAINING", "PRIO"], rows))
+                print(format_table(PS_HEADERS, rows))
             else:
                 print("no processes in the queue")
             print("\n(press Ctrl+C to stop)")
@@ -166,15 +237,39 @@ def handle_top(ctx: Context, args: List[str]) -> None:
 
 
 def handle_kill(ctx: Context, args: List[str]) -> None:
+    """kill [-t] <pid> — terminate a process; -t also kills all its descendants."""
+    tree = False
+    if args and args[0] in ("-t", "--tree"):
+        tree = True
+        args = args[1:]
+    # the parser allows up to two tokens so "-t <pid>" fits; anything else that
+    # leaves more than one positional is a mistake and is rejected here.
+    if len(args) != 1:
+        raise ShellError("usage: kill [-t] <pid>")
     pid = args[0]
-    result = api(
-        ctx, "POST", f"/scheduler/terminate/{pid}", params={"agent_id": ctx.agent}
-    )
+
+    path = f"/scheduler/kill-tree/{pid}" if tree else f"/scheduler/terminate/{pid}"
+    result = api(ctx, "POST", path, params={"agent_id": ctx.agent})
+
     if not result.get("process_found") and not result.get("cancelled_llm_call"):
         print(f"no such process '{pid}' (nothing to kill)")
         return
+
+    if tree:
+        killed = result.get("killed", [])
+        print(f"killed subtree rooted at '{pid}': {', '.join(killed)}")
+        return
+
     extra = " (cancelled in-flight LLM call)" if result.get("cancelled_llm_call") else ""
     print(f"killed '{pid}'{extra}")
+    if result.get("zombie"):
+        print(
+            f"  '{pid}' is now a zombie holding exit status "
+            f"{result.get('exit_status')} until its parent reaps it"
+        )
+    reparented = result.get("reparented_to_init") or []
+    if reparented:
+        print(f"  reparented to init (orphans survive): {', '.join(reparented)}")
 
 
 def handle_limits(ctx: Context, args: List[str]) -> None:
@@ -316,7 +411,10 @@ def _register(cmd: Command) -> None:
 
 _register(Command("ps", handle_ps, "none", 0, 0, "ps", "process table"))
 _register(Command("top", handle_top, "none", 0, 0, "top", "auto-refreshing ps + provider state"))
-_register(Command("kill", handle_kill, "tokens", 1, 1, "kill <pid>", "terminate a process"))
+_register(Command("kill", handle_kill, "tokens", 1, 2, "kill [-t] <pid>", "terminate a process (-t = whole subtree)"))
+_register(Command("pstree", handle_pstree, "none", 0, 0, "pstree", "process hierarchy as a tree"))
+_register(Command("spawn", handle_spawn, "tokens", 0, 1, "spawn [pid]", "fork a child process"))
+_register(Command("wait", handle_wait, "tokens", 1, 2, "wait <parent> [child]", "reap a zombie child"))
 _register(Command("limits", handle_limits, "tokens", 0, 1, "limits [agent]", "quota usage vs limit"))
 _register(Command("ls", handle_ls, "tokens", 0, 1, "ls [agent]", "list an agent's files"))
 _register(Command("cat", handle_cat, "rest", 1, 1, "cat <filename>", "print a file's contents"))

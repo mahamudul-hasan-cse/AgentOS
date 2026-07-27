@@ -81,10 +81,29 @@ def test_missing_required_args_produce_clear_errors_not_exceptions():
 
 
 def test_too_many_args_are_rejected():
-    assert not resolve("kill P1 P2").ok  # kill takes exactly one
+    assert not resolve("kill P1 P2 P3").ok  # kill accepts at most "-t <pid>"
     assert not resolve("mem a b").ok
     assert not resolve("ps extra").ok  # ps takes none
     assert "no arguments" in resolve("ps extra").error
+
+
+def test_kill_accepts_the_tree_flag():
+    res = resolve("kill -t P1")
+    assert res.ok
+    assert res.command.name == "kill"
+    assert res.args == ["-t", "P1"]
+
+
+def test_kill_rejects_two_positionals_at_the_handler():
+    """`kill P1 P2` is arity-legal (the parser allows two tokens so "-t <pid>"
+    fits) but meaningless, so the handler rejects it — before any network call."""
+    from shell.repl import Context, ShellError, handle_kill
+
+    res = resolve("kill P1 P2")
+    assert res.ok
+    ctx = Context(base_url="http://unused.invalid", agent="tester")
+    with pytest.raises(ShellError):
+        handle_kill(ctx, res.args)
 
 
 def test_unknown_command_is_a_clean_error():

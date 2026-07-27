@@ -30,7 +30,16 @@ def _process_to_dict(p: Process) -> dict:
         "estimated_burst": p.estimated_burst,
         "remaining_burst": p.remaining_burst,
         "priority": p.priority,
+        "parent_pid": p.parent_pid,
+        "exit_status": p.exit_status,
     }
+
+
+def _replace_queue(processes: list[Process]) -> None:
+    """Swap in a new process queue while keeping init, the ancestor of every
+    process, alive."""
+    dispatcher.scheduler.queue = list(processes)
+    dispatcher.scheduler.ensure_init()
 
 
 def _seed_scheduler_demo() -> None:
@@ -54,7 +63,7 @@ def _seed_scheduler_demo() -> None:
     sample[3].state = "waiting"
 
     # register into the live scheduler so the seeded queue is real (and killable)
-    dispatcher.scheduler.queue = sample
+    _replace_queue(sample)
     scheduler_state["timeline"] = [{"pid": s.pid, "start": s.start, "end": s.end} for s in timeline]
     scheduler_state["algorithm"] = "round_robin"
 
@@ -223,7 +232,7 @@ def scheduler_gantt(request: GanttRequest) -> GanttResponse:
 
     # Register the submitted processes into the dispatcher's scheduler — the
     # single source of truth that /scheduler/state and /scheduler/terminate read.
-    dispatcher.scheduler.queue = processes
+    _replace_queue(processes)
 
     timeline_out = [{"pid": s.pid, "start": s.start, "end": s.end} for s in timeline]
     scheduler_state["timeline"] = timeline_out
@@ -253,22 +262,69 @@ def scheduler_state_endpoint() -> SchedulerStateResponse:
     )
 
 
-class TerminateResponse(BaseModel):
-    pid: str
-    cancelled_llm_call: bool
-    process_found: bool
-    memory_retained: bool
-
-
-@app.post("/scheduler/terminate/{pid}", response_model=TerminateResponse)
-async def scheduler_terminate(pid: str, agent_id: str | None = None) -> TerminateResponse:
+@app.post("/scheduler/terminate/{pid}")
+async def scheduler_terminate(pid: str, agent_id: str | None = None) -> dict:
     """SIGKILL a process: cancel its in-flight LLM_CALL and mark it terminated.
     `agent_id` is the caller (defaults to the pid itself, i.e. self-termination);
-    terminating another agent's process requires a KERNEL-privileged caller."""
+    terminating another agent's process requires a KERNEL-privileged caller.
+
+    Children are NOT killed — they are reparented to init. Use
+    /scheduler/kill-tree/{pid} for cascading termination."""
     caller = agent_id or pid
     syscall = await dispatcher.dispatch(caller, SyscallType.TERMINATE_AGENT, pid=pid)
     _raise_for_syscall(syscall)
-    return TerminateResponse(**syscall.result)
+    return syscall.result
+
+
+@app.post("/scheduler/kill-tree/{pid}")
+async def scheduler_kill_tree(pid: str, agent_id: str | None = None) -> dict:
+    """Terminate a process AND all of its descendants (opt-in cascade)."""
+    caller = agent_id or pid
+    syscall = await dispatcher.dispatch(
+        caller, SyscallType.TERMINATE_AGENT, pid=pid, tree=True
+    )
+    _raise_for_syscall(syscall)
+    return syscall.result
+
+
+class SpawnRequest(BaseModel):
+    agent_id: str
+    pid: str | None = None
+    privilege: str | None = None
+    estimated_burst: float = 0.0
+    priority: int = 0
+
+
+@app.post("/scheduler/spawn")
+async def scheduler_spawn(request: SpawnRequest) -> dict:
+    """fork(): create a child process owned by `agent_id`. The child inherits the
+    caller's privilege unless a lower one is requested; asking for a higher one
+    is refused as privilege escalation."""
+    syscall = await dispatcher.dispatch(
+        request.agent_id,
+        SyscallType.SPAWN_AGENT,
+        pid=request.pid,
+        privilege=request.privilege,
+        estimated_burst=request.estimated_burst,
+        priority=request.priority,
+    )
+    _raise_for_syscall(syscall)
+    return syscall.result
+
+
+@app.post("/scheduler/wait/{pid}")
+async def scheduler_wait(pid: str, child_pid: str | None = None) -> dict:
+    """wait(): `pid` reaps one of its zombie children, retrieving the exit status
+    and removing the zombie from the process table. Omit `child_pid` to reap any."""
+    syscall = await dispatcher.dispatch(pid, SyscallType.WAIT, pid=child_pid)
+    _raise_for_syscall(syscall)
+    return syscall.result
+
+
+@app.get("/scheduler/tree")
+def scheduler_tree() -> dict:
+    """The full process hierarchy as nested JSON, rooted at init."""
+    return dispatcher.scheduler.get_tree()
 
 
 class MemoryPageOut(BaseModel):
@@ -444,6 +500,10 @@ def replay_diff(id_a: int, id_b: int) -> dict:
         return dispatcher.recorder.diff(id_a, id_b)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e).strip("'")) from e
+
+
+class ResourceModeRequest(BaseModel):
+    avoidance_enabled: bool
 
 
 class QuotaUsageResponse(BaseModel):
