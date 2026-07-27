@@ -95,6 +95,49 @@ Open http://localhost:3000. The backend enables CORS for `http://localhost:3000`
 and seeds demo scheduler/memory state on startup so the panels are populated
 immediately. See [`dashboard/README.md`](dashboard/README.md) for details.
 
+## Evaluation
+
+The algorithms are measured, not just implemented. Everything is seeded, so
+results are reproducible and citable — see
+[`benchmarks/README.md`](benchmarks/README.md) for the full write-up, raw JSON
+and charts.
+
+```bash
+python -m benchmarks.scheduler_bench    # FCFS / RR / Priority / MLFQ
+python -m benchmarks.memory_bench       # FIFO / LRU / Semantic-LRU / Random
+python -m benchmarks.belady_bench       # capacity sweep, Belady's Anomaly
+python -m benchmarks.cow_bench          # copy-on-write savings vs naive fork
+```
+
+### Belady's Anomaly
+
+Adding memory should never make a page-replacement policy *worse* — except that
+for some policies it can. This experiment sweeps RAM capacity as an independent
+variable and looks for steps where an extra frame *raises* the fault rate.
+
+- **The canonical reference string reproduces the textbook exactly**, run
+  through the real `PageManager`: **FIFO 9 → 10 faults** at 3 → 4 frames (the
+  anomaly), **LRU 10 → 8** (immune). Matching the published counts on the
+  published input validates the kernel's own replacement implementations.
+- **The broad sweep found zero anomalies** across 4 policies × 5 traces ×
+  capacities 2–10 × 10 seeds. **LRU** showing none is the expected self-check —
+  it is a stack algorithm, so an anomaly there would have meant a bug in our
+  code. **FIFO** is therefore confirmed *in principle but not triggered by our
+  workloads*.
+- **Semantic-LRU showed no anomaly — a negative result, not proof of immunity.**
+  It has no stack property, so nothing forbids one; this is absence of evidence
+  over one workload set.
+- Note the sweep runs on `PolicySim`, an in-memory replica of the policies
+  (ChromaDB write throughput makes the live path ~8s per cell), cross-validated
+  against the real kernel on the canonical string. The
+  [full write-up](benchmarks/README.md#3-beladys-anomaly-experiment) covers what
+  that does and does not license you to conclude.
+
+A methodology note worth repeating: a 5-seed run reported an anomaly that
+**vanished at 10 seeds**. The threshold for calling a step "systematic" was
+tightened from >50% to ≥75% of seeds as a result, and every reported anomaly
+now carries its seed count.
+
 ## Roadmap
 
 Remaining phases from `PROJECT_PLAN.md`:
