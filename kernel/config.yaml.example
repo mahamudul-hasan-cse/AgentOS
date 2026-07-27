@@ -26,3 +26,10 @@ embeddings:
   backend: "ollama"
   model: "nomic-embed-text"
   # host: "http://localhost:11434"   # optional; defaults to ollama.host above
+
+# Deadlock detection (only active when resource avoidance is turned OFF via
+# POST /resources/mode). Raise interval_seconds for a demo: the monitor
+# recovers a cycle within one interval, so a longer interval keeps the
+# DEADLOCKED state visible on the dashboard long enough to see it.
+deadlock:
+  interval_seconds: 5

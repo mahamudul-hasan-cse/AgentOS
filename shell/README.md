@@ -39,6 +39,8 @@ python shell/repl.py --agent alice                    # act as a USER-level agen
 | `pstree`           | `GET /scheduler/tree`             | process hierarchy as an ASCII tree       |
 | `spawn [pid]`      | `POST /scheduler/spawn`           | fork a child process                     |
 | `wait <p> [child]` | `POST /scheduler/wait/{pid}`      | reap a zombie child, read its exit status|
+| `deadlock [detect]`| `GET /deadlock/status` + `/graph` | wait-for graph and cycle status          |
+| `mode <on\|off>`    | `POST /resources/mode`            | toggle deadlock avoidance                |
 | `run <prompt>`     | `POST /generate`                  | issue an LLM_CALL, shows serving driver  |
 | `help`             | —                                 | list commands                            |
 | `exit` / `quit`    | —                                 | leave the shell                          |
@@ -101,3 +103,23 @@ Errors are always printed as a clean one-liner — `403 → permission denied`,
 `429 → quota exceeded`, `404 → not found` — never a raw traceback.
 ```
 
+## Demoing deadlock detection
+
+Deadlock **avoidance** (Banker's Algorithm) is on by default, and while it is on
+the detector correctly finds nothing - the two are alternative strategies, not
+layers. To demo detection:
+
+```
+aios:root$ mode off        # greedy granting; real circular waits can now form
+aios:root$ deadlock        # wait-for graph + cycle status
+```
+
+Turning avoidance off also starts a background scan that **auto-recovers** any
+cycle it finds, within one interval. The default interval is 5s, which can make
+a deadlock vanish before you can look at it. For a demo, raise it in
+`kernel/config.yaml`:
+
+```yaml
+deadlock:
+  interval_seconds: 60   # keeps the DEADLOCKED state observable
+```

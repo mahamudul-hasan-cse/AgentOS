@@ -22,7 +22,16 @@ venv\Scripts\activate        # Windows
 # source venv/bin/activate   # macOS/Linux
 
 pip install -r requirements.txt
+
+# optional: test runner + headless-browser dashboard verification
+pip install -r requirements-dev.txt
+python -m playwright install chromium chromium-headless-shell
 ```
+
+Dependencies are split deliberately: `requirements.txt` is what the kernel needs
+to **run**, `requirements-dev.txt` is what you need to **verify** it (pytest,
+playwright). Nothing in the dev file is imported by `kernel/`, `api/`, `agents/`
+or `shell/`.
 
 `kernel/config.yaml` is gitignored (it holds real API keys). Copy the template and fill in your keys:
 

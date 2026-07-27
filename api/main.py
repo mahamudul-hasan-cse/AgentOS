@@ -116,13 +116,24 @@ async def lifespan(app: FastAPI):
         await _seed_memory_demo()
     except Exception:  # seeding is best-effort; never block startup on it
         pass
-    yield
+    # start the deadlock monitor iff avoidance is off (see _sync_deadlock_monitor)
+    await _sync_deadlock_monitor()
+    try:
+        yield
+    finally:
+        # always cancel the background task, even if startup raised
+        await dispatcher.deadlock_detector.stop()
 
 
 app = FastAPI(title="AgentOS-Lite", lifespan=lifespan)
+# This is a local development kernel for a course project, not an
+# internet-facing service, so a permissive policy across localhost ports is
+# appropriate: the dashboard routinely moves to :3001+ when :3000 is taken, and
+# pinning a single port turns that into a confusing "Failed to fetch". It stays
+# LOCALHOST-ONLY rather than a wildcard — no remote origin is ever allowed.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -504,6 +515,67 @@ def replay_diff(id_a: int, id_b: int) -> dict:
 
 class ResourceModeRequest(BaseModel):
     avoidance_enabled: bool
+
+
+async def _sync_deadlock_monitor() -> bool:
+    """Run the background detector only when it can actually do something.
+
+    The two strategies are alternatives: while avoidance is on, the Banker's
+    Algorithm prevents cycles upstream and a periodic scan would burn a syscall
+    every interval to find nothing forever. So the monitor runs exactly when
+    avoidance is OFF. Returns whether it is now running."""
+    if dispatcher.resource_manager.avoidance_enabled:
+        await dispatcher.deadlock_detector.stop()
+        return False
+    dispatcher.start_deadlock_monitor()
+    return True
+
+
+@app.post("/resources/mode")
+async def resources_mode(request: ResourceModeRequest) -> dict:
+    """Toggle deadlock AVOIDANCE (Banker's Algorithm).
+
+    On (default): unsafe grants are refused, so deadlock essentially cannot
+    form — and the detector correctly finds nothing. Off: slots are granted
+    greedily (still bounded by capacity), letting real circular waits develop so
+    detection and recovery can be demonstrated. The two are alternative
+    strategies, not layers.
+
+    Flipping the mode also starts/stops the background detection task."""
+    enabled = dispatcher.resource_manager.set_avoidance(request.avoidance_enabled)
+    monitoring = await _sync_deadlock_monitor()
+    return {
+        "avoidance_enabled": enabled,
+        "strategy": "avoidance (Banker's Algorithm)" if enabled else "detection + recovery",
+        "monitoring": monitoring,
+        "interval_seconds": dispatcher.deadlock_detector.interval,
+    }
+
+
+@app.get("/deadlock/graph")
+def deadlock_graph() -> dict:
+    """The current wait-for graph: an edge A -> B means A is blocked on a
+    resource B holds."""
+    return dispatcher.deadlock_detector.build_graph().as_dict()
+
+
+@app.get("/deadlock/status")
+def deadlock_status() -> dict:
+    """Whether a cycle currently exists, and its members."""
+    return dispatcher.deadlock_detector.status()
+
+
+@app.post("/deadlock/detect")
+async def deadlock_detect(recover: bool = False) -> dict:
+    """Force an immediate detection run. With ?recover=true, also break any
+    cycle found by terminating a victim."""
+    if recover:
+        return await dispatcher.run_deadlock_scan()
+    syscall = await dispatcher.dispatch(
+        dispatcher.KERNEL_AGENT, SyscallType.DEADLOCK_DETECT
+    )
+    _raise_for_syscall(syscall)
+    return syscall.result
 
 
 class QuotaUsageResponse(BaseModel):

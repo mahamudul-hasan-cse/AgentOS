@@ -106,8 +106,23 @@ class SyscallDispatcher:
             SyscallType.SET_QUOTA: self._handle_set_quota,
             SyscallType.SPAWN_AGENT: self._handle_spawn_agent,
             SyscallType.WAIT: self._handle_wait,
+            SyscallType.DEADLOCK_DETECT: self._handle_deadlock_detect,
+            SyscallType.DEADLOCK_RECOVER: self._handle_deadlock_recover,
         }
         self._spawn_counter = 0
+        # Deadlock detection/recovery, the complement to the Banker's Algorithm
+        # avoidance in the resource manager. Recovery kills its victim through
+        # this dispatcher's own TERMINATE_AGENT path, so the kill is logged and
+        # snapshotted like any other syscall.
+        from kernel.access_control import AgentPrivilege, DeadlockDetector
+
+        # the kernel acts as a KERNEL-privileged agent for its own housekeeping
+        self.acl.registry.register("kernel", AgentPrivilege.KERNEL)
+        self.deadlock_detector = DeadlockDetector(
+            resource_manager=self.resource_manager,
+            scheduler=self.scheduler,
+            terminate=self._terminate_for_recovery,
+        )
 
     async def dispatch(self, agent_id: str, syscall_type: SyscallType, **args) -> Syscall:
         from kernel.access_control import AccessDenied, QuotaExceeded
@@ -499,6 +514,48 @@ class SyscallDispatcher:
             "state": child.state,
             "priority": child.priority,
         }
+
+    #: identity the kernel itself acts as for its own housekeeping syscalls
+    KERNEL_AGENT = "kernel"
+
+    async def _terminate_for_recovery(self, pid: str) -> Any:
+        """Kill a deadlock victim through the normal syscall path so the action
+        is access-controlled, logged, and captured in replay snapshots."""
+        from kernel.access_control import AgentPrivilege
+
+        self.acl.registry.register(self.KERNEL_AGENT, AgentPrivilege.KERNEL)
+        return await self.dispatch(
+            self.KERNEL_AGENT, SyscallType.TERMINATE_AGENT, pid=pid
+        )
+
+    async def _handle_deadlock_detect(self, agent_id: str, **_) -> Dict[str, Any]:
+        """Run one detection pass over the wait-for graph."""
+        return self.deadlock_detector.detect().as_dict()
+
+    async def _handle_deadlock_recover(
+        self, agent_id: str, cycle: Optional[List[str]] = None, **_
+    ) -> Dict[str, Any]:
+        """Detect (if needed) and break a cycle by terminating a victim."""
+        return await self.deadlock_detector.recover(cycle)
+
+    async def run_deadlock_scan(self) -> Dict[str, Any]:
+        """One periodic scan: detect, and recover if a cycle is present. Both
+        steps go through dispatch() so they show up in the syscall trace."""
+        detect = await self.dispatch(self.KERNEL_AGENT, SyscallType.DEADLOCK_DETECT)
+        result = detect.result if isinstance(detect.result, dict) else {}
+        if not result.get("deadlocked"):
+            return {"deadlocked": False, "recovered": False}
+        recover = await self.dispatch(
+            self.KERNEL_AGENT, SyscallType.DEADLOCK_RECOVER, cycle=result.get("cycle")
+        )
+        return {"deadlocked": True, "recovery": recover.result}
+
+    def start_deadlock_monitor(self) -> None:
+        """Begin periodic background detection (kernel identity, KERNEL rights)."""
+        from kernel.access_control import AgentPrivilege
+
+        self.acl.registry.register(self.KERNEL_AGENT, AgentPrivilege.KERNEL)
+        self.deadlock_detector.start(on_event=self.run_deadlock_scan)
 
     async def _handle_wait(
         self, agent_id: str, pid: Optional[str] = None, **_

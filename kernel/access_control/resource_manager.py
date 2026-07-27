@@ -15,7 +15,7 @@ independently per provider.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from kernel.drivers import DriverError
 
@@ -42,6 +42,10 @@ class ProviderPool:
         self.allocation: Dict[str, int] = {}
         self.max_claim: Dict[str, int] = {}
         self.peak_allocated = 0
+        # agents whose most recent request for this pool was refused and are
+        # therefore blocked on it. This is what turns allocation state into a
+        # wait-for graph: a waiter has an edge to every current holder.
+        self.waiting: Dict[str, int] = {}
 
     def allocated(self) -> int:
         return sum(self.allocation.values())
@@ -49,12 +53,16 @@ class ProviderPool:
     def available(self) -> int:
         return self.total - self.allocated()
 
+    def holders(self) -> List[str]:
+        return [agent for agent, units in self.allocation.items() if units > 0]
+
 
 class ResourceManager:
     def __init__(
         self,
         capacities: Optional[Dict[str, int]] = None,
         default_capacity: int = DEFAULT_CAPACITY,
+        avoidance_enabled: bool = True,
     ) -> None:
         self._default_capacity = default_capacity
         source = capacities if capacities is not None else DEFAULT_CAPACITIES
@@ -62,6 +70,13 @@ class ResourceManager:
             name: ProviderPool(cap) for name, cap in source.items()
         }
         self._lock = asyncio.Lock()
+        # Deadlock AVOIDANCE (Banker's Algorithm). While enabled, a grant that
+        # would leave the pool in an unsafe state is refused, so a true deadlock
+        # can essentially never form — which also means the deadlock DETECTOR
+        # would have nothing to find. Turning this off makes the manager hand
+        # out slots greedily (still bounded by physical capacity), letting real
+        # circular waits develop so detection and recovery can be exercised.
+        self.avoidance_enabled = avoidance_enabled
 
     def _pool(self, provider: str) -> ProviderPool:
         pool = self._pools.get(provider)
@@ -106,6 +121,8 @@ class ResourceManager:
 
             # can't hand out more than physically exists right now
             if units > pool.available():
+                # blocked on this pool: it is held by whoever currently owns it
+                pool.waiting[agent_id] = units
                 return False
 
             claim = max_claim if max_claim is not None else 1
@@ -115,8 +132,11 @@ class ResourceManager:
             pool.allocation[agent_id] = new_allocation
             pool.max_claim[agent_id] = declared
 
-            if self._is_safe(pool):
+            # With avoidance disabled the safety check is skipped entirely and
+            # the grant goes through greedily.
+            if not self.avoidance_enabled or self._is_safe(pool):
                 pool.peak_allocated = max(pool.peak_allocated, pool.allocated())
+                pool.waiting.pop(agent_id, None)  # no longer blocked
                 return True
 
             # unsafe — roll back the tentative allocation
@@ -128,6 +148,7 @@ class ResourceManager:
                 pool.max_claim.pop(agent_id, None)
             else:
                 pool.max_claim[agent_id] = prev_claim
+            pool.waiting[agent_id] = units
             return False
 
     async def release(self, agent_id: str, provider: str, units: int = 1) -> None:
@@ -140,11 +161,53 @@ class ResourceManager:
             else:
                 pool.allocation.pop(agent_id, None)
                 pool.max_claim.pop(agent_id, None)
+            pool.waiting.pop(agent_id, None)
+
+    def release_all(self, agent_id: str) -> Dict[str, int]:
+        """Drop every allocation and pending wait held by an agent, across all
+        pools. Used by deadlock recovery when a victim is terminated: its
+        resources must go back to the pool for the cycle to actually break."""
+        freed: Dict[str, int] = {}
+        for name, pool in self._pools.items():
+            units = pool.allocation.pop(agent_id, None)
+            pool.max_claim.pop(agent_id, None)
+            pool.waiting.pop(agent_id, None)
+            if units:
+                freed[name] = units
+        return freed
+
+    def clear_wait(self, agent_id: str, provider: Optional[str] = None) -> None:
+        """Forget that an agent is blocked (it gave up, or was served)."""
+        pools = [self._pool(provider)] if provider else list(self._pools.values())
+        for pool in pools:
+            pool.waiting.pop(agent_id, None)
+
+    def set_avoidance(self, enabled: bool) -> bool:
+        self.avoidance_enabled = enabled
+        return self.avoidance_enabled
+
+    def waiting_state(self) -> Dict[str, Dict[str, int]]:
+        """provider -> {agent: units it is blocked waiting for}."""
+        return {
+            name: dict(pool.waiting)
+            for name, pool in self._pools.items()
+            if pool.waiting
+        }
+
+    def holdings(self) -> Dict[str, Dict[str, int]]:
+        """agent -> {provider: units held}, the inverse of the allocation view."""
+        out: Dict[str, Dict[str, int]] = {}
+        for name, pool in self._pools.items():
+            for agent, units in pool.allocation.items():
+                if units > 0:
+                    out.setdefault(agent, {})[name] = units
+        return out
 
     def state(self) -> Dict[str, Any]:
         """Snapshot of allocation/availability/safe-state per provider."""
         return {
             name: {
+                "waiting": dict(pool.waiting),
                 "total": pool.total,
                 "allocated": pool.allocated(),
                 "available": pool.available(),

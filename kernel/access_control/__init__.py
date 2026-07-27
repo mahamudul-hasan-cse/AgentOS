@@ -5,6 +5,13 @@ from .acl import (
     AgentRegistry,
     USER_ALLOWED_SYSCALLS,
 )
+from .deadlock_detector import (
+    DEFAULT_DETECTION_INTERVAL,
+    DeadlockDetector,
+    DetectionResult,
+    WaitForGraph,
+    find_cycle,
+)
 from .quota_manager import (
     DEFAULT_MAX_CALLS_PER_MINUTE,
     DEFAULT_MAX_PAGES,
@@ -34,4 +41,9 @@ __all__ = [
     "AgentQuota",
     "DEFAULT_MAX_PAGES",
     "DEFAULT_MAX_CALLS_PER_MINUTE",
+    "DeadlockDetector",
+    "DetectionResult",
+    "WaitForGraph",
+    "find_cycle",
+    "DEFAULT_DETECTION_INTERVAL",
 ]

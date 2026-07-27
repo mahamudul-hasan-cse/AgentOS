@@ -208,6 +208,56 @@ def handle_spawn(ctx: Context, args: List[str]) -> None:
     )
 
 
+def handle_deadlock(ctx: Context, args: List[str]) -> None:
+    """deadlock [detect] — show the wait-for graph and cycle status."""
+    force = bool(args) and args[0] in ("detect", "-d", "--detect")
+    if force:
+        api(ctx, "POST", "/deadlock/detect")
+
+    status = api(ctx, "GET", "/deadlock/status")
+    graph = api(ctx, "GET", "/deadlock/graph")
+
+    mode = "avoidance (Banker's)" if status["avoidance_enabled"] else "detection + recovery"
+    print(f"strategy: {mode}   detection runs: {status['detection_runs']}   "
+          f"recoveries: {status['recoveries']}")
+
+    if status["deadlocked"]:
+        print(f"\n  ** DEADLOCK ** cycle: {' -> '.join(status['cycle'])} -> {status['cycle'][0]}")
+    else:
+        print("\n  no deadlock detected")
+        if status["avoidance_enabled"]:
+            print("  (avoidance is on, so cycles should never form; "
+                  "use 'mode off' to allow them for a demo)")
+
+    nodes = graph.get("nodes", [])
+    if not nodes:
+        print("\n  wait-for graph is empty (no resources held or awaited)")
+        return
+
+    rows = []
+    for node in nodes:
+        holds = ", ".join(f"{p}:{u}" for p, u in (node["holds"] or {}).items()) or "-"
+        waits = ", ".join(node["waiting_on"]) or "-"
+        marker = " <-- in cycle" if node["agent_id"] in status["cycle"] else ""
+        rows.append([node["agent_id"] + marker, holds, waits])
+    print()
+    print(format_table(["AGENT", "HOLDS", "WAITING ON"], rows))
+
+
+def handle_mode(ctx: Context, args: List[str]) -> None:
+    """mode <on|off> — toggle deadlock avoidance (Banker's Algorithm)."""
+    choice = args[0].lower()
+    if choice not in ("on", "off"):
+        raise ShellError("usage: mode <on|off>")
+    result = api(
+        ctx, "POST", "/resources/mode", json={"avoidance_enabled": choice == "on"}
+    )
+    print(f"avoidance {'ENABLED' if result['avoidance_enabled'] else 'DISABLED'} "
+          f"-> strategy: {result['strategy']}")
+    if not result["avoidance_enabled"]:
+        print("  greedy granting: real deadlocks can now form (that's the point)")
+
+
 def _resource_header(ctx: Context) -> str:
     providers = api(ctx, "GET", "/resources/state").get("providers", {})
     parts = [
@@ -420,6 +470,8 @@ _register(Command("ls", handle_ls, "tokens", 0, 1, "ls [agent]", "list an agent'
 _register(Command("cat", handle_cat, "rest", 1, 1, "cat <filename>", "print a file's contents"))
 _register(Command("find", handle_find, "rest", 1, 1, "find <query>", "semantic file search"))
 _register(Command("mem", handle_mem, "tokens", 1, 1, "mem <agent>", "RAM vs swapped pages"))
+_register(Command("deadlock", handle_deadlock, "tokens", 0, 1, "deadlock [detect]", "wait-for graph + cycle status"))
+_register(Command("mode", handle_mode, "tokens", 1, 1, "mode <on|off>", "toggle deadlock avoidance"))
 _register(Command("strace", handle_strace, "tokens", 0, 1, "strace [n]", "recent syscalls (default 20)"))
 _register(Command("run", handle_run, "rest", 1, 1, "run <prompt>", "LLM_CALL via /generate"))
 _register(Command("help", handle_help, "none", 0, 0, "help", "show this help"))

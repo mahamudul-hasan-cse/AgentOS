@@ -1,0 +1,13 @@
+# Development / verification dependencies — NOT needed to run the kernel.
+# Install with:  pip install -r requirements.txt -r requirements-dev.txt
+#
+# Kept separate from requirements.txt so the runtime footprint stays honest:
+# nothing here is imported by kernel/, api/, agents/ or shell/.
+
+# test runner
+pytest
+
+# headless-browser verification of the dashboard panels. After installing,
+# fetch the browser binaries once with:
+#     python -m playwright install chromium chromium-headless-shell
+playwright

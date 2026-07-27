@@ -9,4 +9,3 @@ agno
 pyyaml
 requests
 matplotlib
-pytest

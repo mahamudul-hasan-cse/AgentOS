@@ -31,6 +31,8 @@ class SyscallType(str, Enum):
     BLACKBOARD_WRITE = "BLACKBOARD_WRITE"
     FILE_SEARCH = "FILE_SEARCH"
     SET_QUOTA = "SET_QUOTA"
+    DEADLOCK_DETECT = "DEADLOCK_DETECT"
+    DEADLOCK_RECOVER = "DEADLOCK_RECOVER"
 
 
 class SyscallStatus(str, Enum):

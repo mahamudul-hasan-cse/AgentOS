@@ -1,3 +1,4 @@
+import { Deadlock } from "@/components/Deadlock";
 import { GanttChart } from "@/components/GanttChart";
 import { MemoryView } from "@/components/MemoryView";
 import { ProcessTable } from "@/components/ProcessTable";
@@ -33,6 +34,7 @@ export default function Home() {
           <ProcessTree />
           <MemoryView />
           <SyscallTrace />
+          <Deadlock />
         </div>
       </TimeTravelProvider>
     </main>
