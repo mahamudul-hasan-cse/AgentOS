@@ -409,6 +409,10 @@ class MemoryStateResponse(BaseModel):
     ram_tokens_used: int
     ram_pages: list[dict]
     swapped_pages: list[dict]
+    #: copy-on-write accounting for this agent (shared vs private pages, COW
+    #: faults) and for the whole kernel (frames, tokens saved vs a naive fork)
+    cow: dict = {}
+    cow_global: dict = {}
 
 
 @app.get("/memory/state/{agent_id}", response_model=MemoryStateResponse)
@@ -580,7 +584,15 @@ async def deadlock_detect(recover: bool = False) -> dict:
 
 class QuotaUsageResponse(BaseModel):
     agent_id: str
+    #: the ENFORCED count — private pages only. A copy-on-write shared page
+    #: costs no extra memory, so it is reported but never charged; see DESIGN
+    #: DECISION 2 in kernel/memory/page_manager.py.
     pages_used: int
+    pages_private: int = 0
+    pages_shared: int = 0
+    #: RSS-like view: private + shared
+    pages_total: int = 0
+    quota_charged_on: str = "private pages (shared pages are free)"
     max_pages: int
     calls_in_window: int
     max_calls_per_minute: int

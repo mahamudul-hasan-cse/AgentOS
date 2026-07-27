@@ -73,6 +73,9 @@ class SyscallDispatcher:
         # per-agent quotas (memory pages + LLM call rate), layered on top of the
         # per-provider resource pools.
         self.quota_manager = quota_manager if quota_manager is not None else QuotaManager()
+        # let quota accounting see copy-on-write sharing (enforced on private
+        # pages; see DESIGN DECISION 2 in kernel/memory/page_manager.py)
+        self.quota_manager.bind_page_manager(self.page_manager)
         # the filesystem shares this dispatcher's AccessControl so per-agent file
         # scoping uses the same privilege registry as syscall enforcement.
         self.filesystem = (
@@ -427,6 +430,7 @@ class SyscallDispatcher:
             targets = [p.pid for p in self.scheduler.descendants(pid)] + [pid]
             cancelled_pids = [t for t in targets if await self._cancel_inflight(t)]
             killed = self.scheduler.kill_tree(pid, exit_status=exit_status)
+            released = [self.page_manager.release_agent(t) for t in killed]
             return {
                 "pid": pid,
                 "tree": True,
@@ -434,24 +438,30 @@ class SyscallDispatcher:
                 "cancelled_llm_calls": cancelled_pids,
                 "process_found": bool(killed),
                 "cancelled_llm_call": bool(cancelled_pids),
-                "memory_retained": True,
+                "frames_freed": [f for r in released for f in r["frames_freed"]],
+                "frames_still_shared": [
+                    f for r in released for f in r["frames_still_shared"]
+                ],
             }
 
         cancelled = await self._cancel_inflight(pid)
         result = self.scheduler.terminate(pid, exit_status=exit_status)
         process_found = result["found"]
 
-        # Memory decision: we intentionally do NOT release the agent's pages.
-        # In this model, PageManager pages are the agent's persisted conversation
-        # history (backed by ChromaDB swap) — data that outlives a single
-        # execution, like files a killed OS process leaves on disk. Wiping it on
-        # every kill would be destructive and irreversible; a separate explicit
-        # cleanup could purge it if ever desired.
+        # Memory: with copy-on-write the agent's page-table entries are dropped
+        # and every frame it referenced is decremented. A frame is only really
+        # freed once its LAST referencing agent is gone, so a terminating parent
+        # never pulls memory out from under a child that forked from it. (This
+        # supersedes the pre-COW behaviour of retaining pages indefinitely,
+        # which would have leaked a reference on every kill.)
+        released = self.page_manager.release_agent(pid) if process_found else None
         return {
             "pid": pid,
             "cancelled_llm_call": cancelled,
             "process_found": process_found,
-            "memory_retained": True,
+            "pages_released": (released or {}).get("pages_released", 0),
+            "frames_freed": (released or {}).get("frames_freed", []),
+            "frames_still_shared": (released or {}).get("frames_still_shared", []),
             # a child with a live non-init parent lingers until that parent
             # reaps it with WAIT
             "zombie": result["zombie"],
@@ -507,12 +517,19 @@ class SyscallDispatcher:
         # inheriting the parent's; touching usage() materialises that entry.
         self.quota_manager.usage(pid)
 
+        # fork(): the child's page table REFERENCES the parent's pages. No
+        # content is copied — refcounts rise and the first write through either
+        # side triggers a copy-on-write fault.
+        cow = self.page_manager.fork(agent_id, pid)
+
         return {
             "pid": child.pid,
             "parent_pid": child.parent_pid,
             "privilege": child_privilege.value,
             "state": child.state,
             "priority": child.priority,
+            "inherited_pages": cow["shared_pages"],
+            "tokens_shared_not_copied": cow["tokens_saved"],
         }
 
     #: identity the kernel itself acts as for its own housekeeping syscalls

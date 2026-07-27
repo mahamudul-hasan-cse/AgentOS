@@ -192,8 +192,15 @@ class StateRecorder:
                     swapped = pm.swap_collection.get(
                         where={"agent_id": agent_id}, include=["metadatas"]
                     )
+                    # ChromaDB ids are agent-scoped ("<agent>::<page>") since
+                    # copy-on-write let two agents share a page_id, so take the
+                    # bare page_id from metadata rather than the document id.
                     swapped_pages = [
-                        {"page_id": pid, "token_count": (meta or {}).get("token_count")}
+                        {
+                            "page_id": (meta or {}).get("page_id")
+                            or (pid.split("::", 1)[1] if "::" in pid else pid),
+                            "token_count": (meta or {}).get("token_count"),
+                        }
                         for pid, meta in zip(swapped["ids"], swapped["metadatas"])
                     ]
                 except Exception:  # noqa: BLE001

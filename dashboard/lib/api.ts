@@ -28,6 +28,9 @@ export interface MemoryPage {
   content?: string;
   token_count: number;
   last_accessed?: number | null;
+  /** copy-on-write: true when another agent references the same frame */
+  shared?: boolean;
+  refcount?: number;
 }
 
 export interface MemoryState {
@@ -36,6 +39,10 @@ export interface MemoryState {
   ram_tokens_used: number;
   ram_pages: MemoryPage[];
   swapped_pages: MemoryPage[];
+  /** per-agent COW accounting: pages_shared / pages_private / cow_faults */
+  cow?: Record<string, number>;
+  /** kernel-wide COW accounting incl. tokens_saved vs a naive copy-on-fork */
+  cow_global?: Record<string, number>;
 }
 
 export interface SyscallEntry {

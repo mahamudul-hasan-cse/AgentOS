@@ -20,7 +20,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Deque, Dict, Optional, Set
+from typing import Any, Deque, Dict, Optional, Set
 
 DEFAULT_MAX_PAGES = 20
 DEFAULT_MAX_CALLS_PER_MINUTE = 10
@@ -51,6 +51,15 @@ class QuotaManager:
         self.default_max_calls_per_minute = default_max_calls_per_minute
         self.window_seconds = window_seconds
         self._quotas: Dict[str, AgentQuota] = {}
+        #: optional PageManager, bound by the dispatcher. When present, page
+        #: accounting comes from it so copy-on-write sharing is visible (see
+        #: DESIGN DECISION 2 in page_manager.py): the quota is enforced on
+        #: PRIVATE pages only, because a shared page costs no extra memory and
+        #: charging every sharer would make fork instantly exceed the quota.
+        self._page_manager: Optional[Any] = None
+
+    def bind_page_manager(self, page_manager: Any) -> None:
+        self._page_manager = page_manager
 
     def _quota(self, agent_id: str) -> AgentQuota:
         quota = self._quotas.get(agent_id)
@@ -64,13 +73,28 @@ class QuotaManager:
 
     # --- memory-page quota ------------------------------------------------
 
+    def _private_pages(self, agent_id: str) -> int:
+        """The number a page quota is enforced against: pages this agent alone
+        owns. Shared (copy-on-write) pages are reported but not charged."""
+        if self._page_manager is not None:
+            return self._page_manager.private_page_count(agent_id)
+        return len(self._quota(agent_id).page_ids)
+
     def can_write_page(self, agent_id: str, page_id: str) -> bool:
         """True if the agent may (over)write this page without exceeding its
-        page quota. Overwriting an already-owned page never counts as new."""
+        page quota. Overwriting an already-owned page never counts as new.
+
+        Note a write to a SHARED page is always allowed through even at the
+        limit: copy-on-write is about to convert one shared page into one
+        private page, so the agent's charged total does not grow."""
         quota = self._quota(agent_id)
         if page_id in quota.page_ids:
             return True
-        return len(quota.page_ids) < quota.max_pages
+        if self._page_manager is not None and self._page_manager.is_shared(
+            agent_id, page_id
+        ):
+            return True
+        return self._private_pages(agent_id) < quota.max_pages
 
     def record_page(self, agent_id: str, page_id: str) -> None:
         self._quota(agent_id).page_ids.add(page_id)
@@ -118,9 +142,27 @@ class QuotaManager:
         now = time.monotonic() if now is None else now
         quota = self._quota(agent_id)
         self._purge_window(quota, now)
+
+        # Report private / shared / total separately so the policy is never
+        # ambiguous: `pages_used` is the ENFORCED number (private only), while
+        # pages_total is the RSS-like view that includes shared pages.
+        if self._page_manager is not None:
+            cow = self._page_manager.cow_stats(agent_id)
+            pages_private = cow["pages_private"]
+            pages_shared = cow["pages_shared"]
+            pages_total = cow["pages_total"]
+        else:
+            pages_private = len(quota.page_ids)
+            pages_shared = 0
+            pages_total = pages_private
+
         return {
             "agent_id": agent_id,
-            "pages_used": len(quota.page_ids),
+            "pages_used": pages_private,
+            "pages_private": pages_private,
+            "pages_shared": pages_shared,
+            "pages_total": pages_total,
+            "quota_charged_on": "private pages (shared pages are free)",
             "max_pages": quota.max_pages,
             "calls_in_window": len(quota.call_times),
             "max_calls_per_minute": quota.max_calls_per_minute,
