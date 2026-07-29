@@ -271,3 +271,27 @@ def estimate_tokens(text: str) -> int:
 
 def get_chroma_client(path: str = DEFAULT_CHROMA_PATH) -> chromadb.ClientAPI:
     return chromadb.PersistentClient(path=path)
+
+
+def release_chroma_clients() -> None:
+    """Drop ChromaDB's process-global cache of live clients.
+
+    Every `PersistentClient` stays registered — holding sqlite and HNSW file
+    handles — until released, so any process that opens many of them (a
+    multi-seed benchmark sweep, or a full test run) accumulates handles for its
+    whole lifetime. Two consequences seen in practice:
+
+    - intermittent "Error creating hnsw segment reader: Nothing found on disk"
+      part-way through a long sweep;
+    - on Windows, an open handle makes `shutil.rmtree` a **silent no-op**, so
+      directories meant to be temporary are never actually deleted.
+
+    Call this once a client is finished with, and always *before* removing its
+    directory. Safe: it only releases clients, it never touches files.
+    """
+    try:
+        from chromadb.api.shared_system_client import SharedSystemClient
+
+        SharedSystemClient.clear_system_cache()
+    except Exception:  # noqa: BLE001 — cleanup must never mask the caller's result
+        pass

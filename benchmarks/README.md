@@ -11,8 +11,10 @@ From the project root, with the venv active:
 ```bash
 python -m benchmarks.run_all             # both suites + JSON + PNG charts
 python -m benchmarks.run_all --seeds 3    # quicker run, fewer seeds
-python -m benchmarks.scheduler_bench      # scheduler tables only
+python -m benchmarks.scheduler_bench      # scheduler + starvation study (fast)
 python -m benchmarks.memory_bench --seeds 10   # page-replacement only
+python -m benchmarks.belady_bench         # capacity sweep, Belady's Anomaly
+python -m benchmarks.cow_bench            # copy-on-write savings vs naive fork
 ```
 
 **Runtime.** The memory benchmark repeats every trace × policy across
@@ -26,6 +28,9 @@ Artifacts land in `benchmarks/results/`:
   parameters that produced it, so a result is self-describing.
 - `scheduler_*.png`, `memory_*.png` — grouped bar charts, one per metric,
   ready to drop into a report.
+- `scheduler_starvation_*.png` — the three starvation charts (§4). Written by
+  `scheduler_bench` itself, since they need their own layout rather than the
+  generic one-chart-per-metric treatment.
 
 For the memory suite, start Ollama and `ollama pull nomic-embed-text` first.
 Without it the run falls back to hashing embeddings and prints a warning —
@@ -34,22 +39,26 @@ Semantic-LRU under hashing is **not** a fair test of it.
 ## 1. Scheduler benchmark
 
 24 processes with seeded arrival times, bursts and priorities, run through all
-four algorithms over the **identical** workload. (The algorithms mutate the
+six algorithms over the **identical** workload. (The algorithms mutate the
 process objects they schedule, so each run is handed freshly built copies.)
 
-Three workload profiles:
+Four workload profiles:
 
 | profile | shape |
 |---|---|
 | `uniform` | all bursts in a narrow 5–8 band — the homogeneous baseline |
 | `mixed_short_long` | bimodal: 70% short (1–4), 30% long (15–25) |
 | `heavy_tailed` | most jobs tiny (1–3), ~12% enormous (40–60) |
+| `starvation` | saturating priority-0 stream + a few long low-priority victims — see [§4](#4-starvation-under-priority-scheduling-and-the-cost-of-fixing-it) |
 
 ### Metrics
 
 | metric | definition | direction |
 |---|---|---|
 | avg waiting time | turnaround − CPU time actually received | lower better |
+| max waiting time | worst waiting time over all processes | lower better |
+| max wait p>0 | worst waiting time among processes below top priority | lower better |
+| max gap p>0 | longest stretch such a process sat *runnable but off the CPU* | lower better |
 | avg turnaround time | completion − arrival | lower better |
 | avg response time | first moment on CPU − arrival | lower better |
 | throughput | processes completed per time unit, over the makespan | higher better |
@@ -68,6 +77,10 @@ Three workload profiles:
 - **Context switches** are the cost side of preemption: RR and MLFQ buy better
   response time by paying more switches (a real overhead this simulation does
   not otherwise charge for).
+- **Averages hide starvation.** A scheduler that serves 20 processes instantly
+  and leaves 4 waiting nearly forever still posts a respectable mean. That is
+  why the max and per-priority-level breakdowns exist; §4 is built entirely
+  around the gap between the two.
 
 ## 2. Memory / page-replacement benchmark
 
@@ -392,3 +405,281 @@ and annotated with its magnitude and seed count. FIFO and LRU produce identical
 curves on `clustered` and `paraphrased` — correct, since neither consults the
 query and `paraphrased` reuses `clustered`'s access order — so the policies use
 distinct dash patterns to keep a coincident line visible underneath another.
+
+## 4. Starvation under priority scheduling, and the cost of fixing it
+
+Problem, measurement, solution, measurement. Priority scheduling has a famous
+flaw: a low-priority process can be passed over indefinitely if higher-priority
+work keeps arriving. This section demonstrates it, adds the textbook fixes as
+**separate variants** (`priority_aging`, `mlfq_boost` — the originals are left
+untouched so the flaw stays measurable), and then quantifies what the fixes cost.
+
+### 4a. The workload
+
+`starvation` is not a random profile; it is constructed to make the failure
+unavoidable:
+
+- **20 stream processes** at priority 0, burst 2–3, arriving every 2.0 time
+  units. Mean burst 2.5 over a 2.0 interarrival is an **offered load of ~1.25**,
+  so the CPU never runs out of top-priority work while the stream lasts.
+- **6 victims**, two each at priorities 1, 2 and 3, burst 6–10, all arriving in
+  the first 6 time units — *before* most of the stream. Nothing but scheduler
+  policy can explain their waiting time.
+
+### 4b. Measuring starvation is harder than it looks
+
+Three metrics, in increasing sharpness. The first two are not good enough, and
+saying why is most of the work:
+
+| metric | what it misses |
+|---|---|
+| `max_waiting_time` | Under a saturating workload **every** algorithm's max wait grows, so it conflates "the system is overloaded" with "this process is starved". Concretely: as the stream lengthens 8×, FCFS's global max grows ×2.2 (42 → 94) while its *victims'* wait grows only ×1.2 — that ×2.2 is queueing delay landing on the stream's own late arrivals, not starvation. It even charges Priority+Aging ×1.8 for a wait its victims never experience. |
+| `low_priority_max_wait` | Isolates the victims, but still penalises a process for legitimately *being long*. MLFQ ignores the priority field entirely and starves on burst length, so under MLFQ this number cannot distinguish "starved" from "had more work to do". |
+| `max_starvation_gap` | Longest stretch a process sat **runnable but off the CPU** — arrival→first slice, plus every gap between consecutive slices. A large gap always means the scheduler passed the process over. This is the only one of the three that measures starvation as such. |
+
+The gap metric is what makes MLFQ+Boost's benefit visible at all; on
+`low_priority_max_wait` the boost appears to do nothing (flat at 84 for every
+boost interval), which would have been the wrong conclusion.
+
+### 4c. The problem, measured
+
+Per-priority average waiting time, `starvation` profile (seed 20260726):
+
+| algorithm | p0 | p1 | p2 | p3 | max wait p>0 | max gap p>0 |
+|---|---|---|---|---|---|---|
+| fcfs | 48.05 | 6.5 | 23.5 | 38 | 41 | 41 |
+| round_robin | 37.55 | 34.5 | 56.5 | 76 | 84 | 52 |
+| **priority** | **5.8** | 55.5 | 69.5 | **81** | 84 | **84** |
+| priority_aging | 28.35 | 24.5 | 44.5 | 63 | 66 | 66 |
+| mlfq | 27.4 | 73.5 | 79.5 | 83 | 84 | 69 |
+| mlfq_boost | 33 | 52.5 | 58.5 | 83 | 84 | 61 |
+
+Priority posts the **best overall average waiting time of any algorithm (20.3)**
+while simultaneously producing the **worst starvation gap (84)**. That single
+row is the entire argument for not reporting averages alone.
+
+**Is it starvation, or just a long wait?** The distinguishing test is whether
+the wait *grows without bound* as the stream continues. Lengthening the stream
+8× (10 → 80 arrivals) and recording the worst low-priority wait:
+
+| algorithm | stream=10 | 20 | 40 | 80 | growth |
+|---|---|---|---|---|---|
+| fcfs | 36 | 41 | 45 | 44 | **×1.2** |
+| round_robin | 52 | 84 | 124 | 136 | ×2.6 |
+| **priority** | 52 | 84 | 137 | **243** | **×4.7** |
+| **priority_aging** | 52 | 66 | 67 | **69** | **×1.3** |
+| mlfq | 52 | 84 | 137 | 243 | ×4.7 |
+| mlfq_boost | 52 | 84 | 137 | 163 | ×3.1 |
+
+Priority tracks the stream linearly — unbounded. FCFS and Priority+Aging are
+flat — bounded. Round Robin is bounded in principle (every process is
+guaranteed a slice per cycle) but the cycle itself lengthens with the queue,
+so it grows sublinearly rather than staying flat.
+
+> **`priority` and `mlfq` produce identical numbers at every stream length.**
+> Not a copy-paste error: both leave every victim to the very end, so the last
+> victim's completion is pinned to the makespan in both cases. They arrive there
+> for different reasons — Priority by declared priority, MLFQ by burst length.
+> The charts use distinct dash patterns so the coincident line stays visible.
+
+### 4d. The fix
+
+**`priority_aging`** — effective priority improves by one level per
+`aging_interval` time units waited, clamped at 0:
+
+```
+effective_priority(p, now) = max(0, p.priority - floor((now - p.arrival) / interval))
+```
+
+The clamp matters: an aged process can at best *tie* with the top priority,
+never outrank it, and ties break on arrival time. This gives a **structural**
+bound — a process reaches the front after at most `priority * interval` of
+waiting — rather than an empirically-observed-smaller number.
+
+**`mlfq_boost`** — OSTEP's rule 5: every `boost_interval`, sweep every process
+back to the topmost queue. A global sweep rather than per-process promotion,
+because it needs no wait bookkeeping and cannot be gamed by a process that
+yields just before its quantum expires.
+
+Both are **new variants, not replacements**. `priority_scheduling` and `mlfq`
+are untouched, so the flaw remains measurable side by side with its fix — which
+is the only reason the tables above can exist.
+
+### 4e. The cost, measured
+
+Aging is **not a free win, and not a constant** — it is a dial between two
+schedulers you already know. As the interval → 0 every process reaches top
+priority immediately and `priority_aging` degenerates to **FCFS**; as it → ∞
+nothing ever ages and it degenerates to **plain Priority**. Sweeping it traces
+the whole continuum, with both endpoints measured directly as reference rows:
+
+| aging interval | max gap p>0 | avg wait p0 | avg turnaround |
+|---|---|---|---|
+| *(fcfs reference)* | *41* | *48.05* | *46* |
+| 2 | 41 | 48.05 | 46 |
+| 5 | 41 | 47.25 | 45.62 |
+| 10 | 43 | 43.4 | 43.58 |
+| **20** *(default)* | **66** | **28.35** | **35.77** |
+| 40 | 84 | 9 | 25.73 |
+| 80 | 84 | 5.8 | 24.12 |
+| *(priority reference)* | *84* | *5.8* | *24.115* |
+
+The sweep hits both endpoints exactly, which is the check that the
+implementation really is the interpolation it claims to be.
+
+**The tradeoff, in one sentence:** cutting the worst starvation gap from 84 to
+41 costs the priority-0 stream **+42.3 average waiting time** (5.8 → 48.05) and
+**+21.9 average turnaround** (24.1 → 46.0). That cost is not mysterious — it is
+almost exactly the victims' total burst (~45). Serving the victims early means
+every subsequent high-priority job waits behind work that Priority would have
+deferred to the end. **You cannot bound the low-priority wait without moving
+that work earlier, and moving it earlier is what it costs.**
+
+The same holds for MLFQ's boost, at a smaller magnitude:
+
+| boost interval | max gap p>0 | avg wait p0 |
+|---|---|---|
+| 5 | 53 | 37.25 |
+| 10 | 53 | 36.45 |
+| **20** *(default)* | **61** | **33** |
+| 40 | 69 | 27.4 |
+| *(mlfq reference)* | *69* | *27.4* |
+
+**An unplanned finding:** plotted as gap-vs-cost, the aging curve and the boost
+curve lie almost on top of each other (`scheduler_starvation_tradeoff.png`).
+Two mechanisms with quite different implementations — continuous per-process
+priority decay vs. a periodic global sweep — trace essentially the same
+fairness/throughput frontier on this workload. This is one workload and one
+seed, so it is suggestive rather than established, but it is consistent with the
+cost being a property of the *work rearrangement* rather than of the mechanism.
+
+### 4f. Choosing the defaults
+
+`DEFAULT_AGING_INTERVAL = 20.0` and `DEFAULT_BOOST_INTERVAL = 20.0` are
+**not tuned to win**; a winner-picked value would be meaningless given the
+sweep above shows the metric moving monotonically with the dial. 20.0 is ~5×
+the base RR/MLFQ quantum (4.0), which keeps priority meaningful over short
+horizons while still bounding starvation. The right value is workload-dependent,
+and the sweep — not the default — is the deliverable.
+
+A concrete illustration of why this needs stating: the first version of this
+experiment used an interval of 5.0, and `priority_aging` came out **numerically
+identical to FCFS on `mixed_short_long` and `heavy_tailed`** — identical average
+wait, max wait, turnaround, response and context-switch counts. Drop the interval
+to 2.0 and it is identical to FCFS on **all four** profiles. Aging that
+aggressive saturates instantly: every process reaches effective priority 0 long
+before it is ever dispatched, so nothing but arrival order is left. That is not
+a fix for priority scheduling, it is the deletion of priority scheduling — and
+the overall average waiting time barely moves while it happens, which is
+precisely why the per-priority and gap metrics had to exist first.
+
+### 4g. Tests
+
+`tests/test_starvation.py` (7 tests). Each was verified to be discriminating by
+mutation — the mechanism was deliberately broken and the tests confirmed to
+fail:
+
+| mutation | tests that caught it |
+|---|---|
+| aging boost forced to 0 | 3 |
+| boost sweep promotes nothing | 2 |
+| aging clamp `max(0, …)` removed | 2 |
+
+Covered properties: Priority starves a low-priority process (wait > 80, served
+dead last, wait ≥ the whole stream's burst); Priority+Aging on the *identical*
+workload stays within the analytic bound `priority × interval + burst`; that
+bound is **constant** as the stream grows 6× while the unaged wait grows with
+it; aging never inverts two simultaneous arrivals (checked at the unit level
+across all times and end-to-end) and never overtakes the top priority outright;
+MLFQ+Boost caps a demoted process's gap at ~one boost period and dispatches it
+strictly more often than plain MLFQ; the boost interval is monotonic; and both
+variants remain work-conserving with no overlapping slices.
+
+### Artifacts
+
+- `scheduler_starvation_by_priority.png` — average waiting time by priority
+  level, grouped by algorithm. The starvation staircase and its flattening.
+- `scheduler_starvation_growth.png` — worst low-priority wait vs. stream
+  length. Bounded vs. unbounded.
+- `scheduler_starvation_tradeoff.png` — starvation gap vs. high-priority cost,
+  with FCFS/Priority/MLFQ marked as reference points.
+
+## 5. Copy-on-write benchmark
+
+What does COW actually save over the obvious alternative? A parent builds 20
+pages (50 tokens each); *M* children fork from it; each child then issues 40
+seeded accesses that are mostly reads with an occasional write. Only a write
+forces a private copy, so the measured quantity is **how much memory survives
+being shared**.
+
+```bash
+python -m benchmarks.cow_bench
+```
+
+### The baseline it is measured against
+
+**Naive copy-on-fork** duplicates every parent page into every child at spawn
+time, storing `N × (M + 1)` pages *regardless of what anyone subsequently does*.
+COW stores `N` pages plus exactly one extra per distinct `(child, page)` pair
+that was written. The gap is the saving.
+
+Stating the baseline matters: COW's headline numbers are only as impressive as
+the thing being compared against, and naive copy-on-fork is deliberately the
+*worst* reasonable alternative. A real system might instead share nothing and
+re-derive pages on demand, which this benchmark does not model.
+
+### Method notes
+
+- **RAM budget is set to `20 × 50` tokens so nothing ever evicts.** This isolates
+  sharing from eviction; a run where pages were being swapped would confound the
+  two, and the page-replacement question already has its own suite (§2).
+- **Reads go through `frame_of()`**, which touches the frame via the page table
+  without copying — the operation that must *not* trigger a fault.
+- Deterministic offline `HashingEmbedder`, seeded RNG per cell. Reproducible.
+
+### Results (seed 20260727)
+
+Savings, as a percentage of the naive baseline's token count:
+
+| children | 0% writes | 5% | 10% | 25% | 50% | 100% writes |
+|---|---|---|---|---|---|---|
+| 1 | 50.0 | 45.0 | 45.0 | 27.5 | 17.5 | 7.5 |
+| 2 | 66.7 | 63.3 | 55.0 | 38.3 | 28.3 | 6.7 |
+| 4 | 80.0 | 76.0 | 66.0 | 46.0 | 32.0 | 9.0 |
+| 8 | **88.9** | 80.0 | 77.2 | 62.8 | 34.4 | 14.4 |
+
+- **Read-only children: 71.4% mean saving, and it rises with fan-out** (50% at
+  one child → 88.9% at eight). This is the expected shape — the parent's pages
+  are stored once no matter how many children reference them, so the saving
+  approaches `M / (M + 1)`.
+- **Write-everything: 9.4% mean saving.** COW degrades toward the naive
+  baseline as it must; a page written by every child ends up copied for every
+  child, which is precisely the naive behaviour plus the bookkeeping.
+- The interesting region is the middle. At a **10% write ratio with 8 children
+  COW still saves 77%**, which is the case the design is actually for: forked
+  agents that mostly read shared context and occasionally diverge.
+
+### Why 100% writes still saves 6.7–14.4% rather than 0%
+
+Not an accounting error, and worth stating because it looks like one. A child
+issues 40 accesses uniformly over 20 pages, so even writing every time it only
+touches the **distinct** pages it happens to hit; the rest stay shared. The
+coupon-collector expectation is `20 × (1 − (19/20)^40) ≈ 17.4` distinct pages
+per child, and the measured COW faults track it closely:
+
+| children | expected distinct copies | measured `cow_faults` |
+|---|---|---|
+| 1 | 17.4 | 17 |
+| 2 | 34.9 | 36 |
+| 4 | 69.7 | 71 |
+| 8 | 139.4 | 134 |
+
+So "100% writes" means *every access is a write*, not *every page gets written*.
+A workload that wrote all 20 pages in every child would drive the saving to
+approximately zero, which is the true worst case for COW.
+
+### Artifacts
+
+This suite prints tables only — no JSON or charts. The savings surface is a
+smooth two-parameter grid with no anomaly to localise, so the table carries
+everything a chart would.

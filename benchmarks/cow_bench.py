@@ -22,7 +22,11 @@ import tempfile
 from typing import Any, Dict, List
 
 from kernel.memory import PageManager
-from kernel.memory.embeddings import HashingEmbedder, set_embedder
+from kernel.memory.embeddings import (
+    HashingEmbedder,
+    release_chroma_clients,
+    set_embedder,
+)
 
 SEED = 20260727
 PARENT = "parent"
@@ -91,12 +95,8 @@ def run_case(children: int, write_ratio: float, seed: int) -> Dict[str, Any]:
             "savings_ratio": round(1 - cow_tokens / naive_tokens, 4),
         }
     finally:
-        try:
-            from chromadb.api.shared_system_client import SharedSystemClient
-
-            SharedSystemClient.clear_system_cache()
-        except Exception:  # noqa: BLE001
-            pass
+        # release before rmtree: an open handle makes the delete a silent no-op
+        release_chroma_clients()
         shutil.rmtree(chroma_dir, ignore_errors=True)
 
 

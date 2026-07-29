@@ -21,6 +21,10 @@ PAGES = [
 def chroma_path(tmp_path):
     path = str(tmp_path / "chroma_db")
     yield path
+    # Best-effort only. With the ChromaDB client still live this is a silent
+    # no-op on Windows, and releasing the client first to make it work
+    # destabilises ChromaDB's shared state (see tests/conftest.py). pytest's own
+    # tmp_path garbage collection is what actually reclaims these directories.
     shutil.rmtree(path, ignore_errors=True)
 
 

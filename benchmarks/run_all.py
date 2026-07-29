@@ -24,11 +24,15 @@ from benchmarks import memory_bench, scheduler_bench  # noqa: E402
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
-# colour-blind-safe qualitative palette
-PALETTE = ["#4c78a8", "#f58518", "#54a24b", "#e45756"]
+# colour-blind-safe qualitative palette. Paired shades so each scheduler sits
+# next to its aging variant (priority/priority_aging, mlfq/mlfq_boost).
+PALETTE = ["#4c78a8", "#9ecae9", "#e45756", "#f58518", "#54a24b", "#88d27a"]
 
 SCHEDULER_CHARTS = [
     ("avg_waiting_time", "Average waiting time", "time units (lower is better)"),
+    ("max_waiting_time", "Max waiting time", "time units (lower is better)"),
+    ("low_priority_max_gap", "Worst starvation gap (priority > 0)",
+     "longest runnable-but-not-running stretch (lower is better)"),
     ("avg_turnaround_time", "Average turnaround time", "time units (lower is better)"),
     ("avg_response_time", "Average response time", "time units (lower is better)"),
     ("context_switches", "Context switches", "count (lower is better)"),
@@ -119,6 +123,9 @@ def write_scheduler_charts(results: Dict) -> List[Path]:
         path = RESULTS_DIR / f"scheduler_{metric}.png"
         _grouped_bar_chart(path, f"Scheduler — {title}", subtitle, ylabel, profiles, series)
         written.append(path)
+    # the starvation-specific charts own their layout (x = priority level, and
+    # two line charts), so they are drawn by the benchmark module itself
+    written.extend(scheduler_bench.write_starvation_charts(results, RESULTS_DIR))
     return written
 
 

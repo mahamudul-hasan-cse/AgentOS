@@ -1,4 +1,17 @@
-from .algorithms import DEFAULT_MLFQ_QUANTUMS, Process, TimeSlice, fcfs, mlfq, priority_scheduling, round_robin
+from .algorithms import (
+    DEFAULT_AGING_INTERVAL,
+    DEFAULT_BOOST_INTERVAL,
+    DEFAULT_MLFQ_QUANTUMS,
+    Process,
+    TimeSlice,
+    effective_priority,
+    fcfs,
+    mlfq,
+    mlfq_boost,
+    priority_aging,
+    priority_scheduling,
+    round_robin,
+)
 from .scheduler import (
     ALGORITHM_NAMES,
     DEFAULT_QUANTUM,
@@ -14,8 +27,13 @@ __all__ = [
     "fcfs",
     "round_robin",
     "priority_scheduling",
+    "priority_aging",
     "mlfq",
+    "mlfq_boost",
+    "effective_priority",
     "DEFAULT_MLFQ_QUANTUMS",
+    "DEFAULT_AGING_INTERVAL",
+    "DEFAULT_BOOST_INTERVAL",
     "Scheduler",
     "UnknownAlgorithmError",
     "ALGORITHM_NAMES",

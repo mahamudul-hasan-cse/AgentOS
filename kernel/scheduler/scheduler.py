@@ -11,12 +11,21 @@ from .algorithms import (
     TimeSlice,
     fcfs,
     mlfq,
+    mlfq_boost,
+    priority_aging,
     priority_scheduling,
     round_robin,
 )
 
 DEFAULT_QUANTUM = 4.0
-ALGORITHM_NAMES = ("fcfs", "round_robin", "priority", "mlfq")
+ALGORITHM_NAMES = (
+    "fcfs",
+    "round_robin",
+    "priority",
+    "priority_aging",
+    "mlfq",
+    "mlfq_boost",
+)
 
 #: The root of the process hierarchy, ancestor of everything (PID 1 in a real OS).
 INIT_PID = "init"
@@ -237,8 +246,12 @@ class Scheduler:
             return round_robin(self.queue, quantum=quantum)
         if algorithm == "priority":
             return priority_scheduling(self.queue)
+        if algorithm == "priority_aging":
+            return priority_aging(self.queue)
         if algorithm == "mlfq":
             return mlfq(self.queue, quantums=mlfq_quantums or DEFAULT_MLFQ_QUANTUMS)
+        if algorithm == "mlfq_boost":
+            return mlfq_boost(self.queue, quantums=mlfq_quantums or DEFAULT_MLFQ_QUANTUMS)
         raise UnknownAlgorithmError(
             f"Unknown algorithm '{algorithm}'. Available: {', '.join(ALGORITHM_NAMES)}"
         )

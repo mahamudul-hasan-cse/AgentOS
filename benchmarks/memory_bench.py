@@ -47,6 +47,7 @@ from kernel.memory.embeddings import (
     HashingEmbedder,
     OllamaEmbedder,
     build_embedder,
+    release_chroma_clients,
     set_embedder,
 )
 
@@ -286,24 +287,6 @@ TRACE_DESCRIPTIONS = {
         "paraphrases with minimal word overlap - only meaning can match"
     ),
 }
-
-
-def release_chroma_clients() -> None:
-    """Drop ChromaDB's process-global cache of live clients.
-
-    Each PersistentClient stays registered (holding sqlite/HNSW handles) until
-    released. A multi-seed sweep opens ~150 of them, and letting them all stay
-    live is the most plausible cause of the intermittent
-    "Error creating hnsw segment reader: Nothing found on disk" seen mid-sweep.
-    Called after each run, once that run's client is finished with. Safe: it
-    only releases clients, it does not touch files on disk.
-    """
-    try:
-        from chromadb.api.shared_system_client import SharedSystemClient
-
-        SharedSystemClient.clear_system_cache()
-    except Exception:  # noqa: BLE001 — cleanup must never mask results
-        pass
 
 
 def run_trace_resilient(

@@ -103,11 +103,39 @@ results are reproducible and citable — see
 and charts.
 
 ```bash
-python -m benchmarks.scheduler_bench    # FCFS / RR / Priority / MLFQ
+python -m benchmarks.scheduler_bench    # FCFS / RR / Priority (+aging) / MLFQ (+boost)
 python -m benchmarks.memory_bench       # FIFO / LRU / Semantic-LRU / Random
 python -m benchmarks.belady_bench       # capacity sweep, Belady's Anomaly
 python -m benchmarks.cow_bench          # copy-on-write savings vs naive fork
 ```
+
+### Starvation, and what it costs to fix
+
+Priority scheduling's textbook flaw, demonstrated and then repaired:
+problem → measurement → solution → measurement.
+
+- **The flaw is real and averages hide it.** On a workload with a saturating
+  stream of priority-0 arrivals, plain Priority posts the **best average
+  waiting time of any algorithm (20.3)** while leaving the lowest-priority
+  processes with the **worst starvation gap (84)**. Reporting the mean alone
+  would have called it the winner.
+- **It is starvation, not just a long wait.** Lengthening the stream 8×
+  multiplies the worst low-priority wait by **4.7** under Priority (52 → 243)
+  but only **1.3×** under Priority+Aging (52 → 69). Unbounded vs. bounded.
+- **The fixes are added as variants**, `priority_aging` and `mlfq_boost`, so
+  the originals stay measurable next to them.
+- **The fix is not free, and the cost is explainable.** Bounding the wait costs
+  the high-priority stream **+42.3 average waiting time**, which is almost
+  exactly the victims' total burst — you cannot bound the low-priority wait
+  without moving that work earlier, and moving it earlier is what it costs.
+- **Aging is a dial, not a constant.** As its interval → 0 it degenerates to
+  FCFS; as it → ∞ it degenerates to plain Priority, and the sweep hits both
+  endpoints exactly. At an interval of 2.0 it is numerically identical to FCFS
+  on all four profiles — a "fix" that deletes the thing it fixes. The sweep,
+  not the chosen default, is the result.
+
+Full write-up, tables and charts:
+[`benchmarks/README.md` §4](benchmarks/README.md#4-starvation-under-priority-scheduling-and-the-cost-of-fixing-it).
 
 ### Belady's Anomaly
 
