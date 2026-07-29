@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/api";
 import { Deadlock } from "@/components/Deadlock";
 import { GanttChart } from "@/components/GanttChart";
 import { MemoryView } from "@/components/MemoryView";
@@ -19,7 +20,7 @@ export default function Home() {
         </h1>
         <p className="mt-1 text-xs text-slate-500">
           live view of the scheduler, paged memory, and syscall trace · polling{" "}
-          <span className="text-slate-400">http://localhost:8000</span>
+          <span className="text-slate-400">{API_BASE}</span>
         </p>
       </header>
 

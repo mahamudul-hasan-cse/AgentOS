@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agents import run_collaboration
+from kernel.memory import get_embedder
 from kernel.scheduler import DEFAULT_MLFQ_QUANTUMS, Process, Scheduler, UnknownAlgorithmError
 from kernel.syscalls import Syscall, SyscallDispatcher, SyscallStatus, SyscallType
 
@@ -94,8 +95,6 @@ def _log_embedding_backend() -> None:
     records from arbitrary module loggers — without this the choice between
     real (Ollama) and approximate (hashing) embeddings would be invisible at
     startup, which is exactly the ambiguity we want to avoid."""
-    from kernel.memory import get_embedder
-
     log = logging.getLogger("uvicorn.error")
     if not log.handlers and not logging.getLogger().handlers:
         logging.basicConfig(level=logging.INFO)
@@ -172,6 +171,22 @@ class GenerateRequest(BaseModel):
 class GenerateResponse(BaseModel):
     driver_used: str
     text: str
+
+
+@app.get("/health")
+def health() -> dict:
+    """Liveness probe, used by the compose healthcheck.
+
+    Also reports the active embedding backend, because "is it up" and "is it
+    running in the mode I expect" are different questions — this is how you tell
+    Ollama-only mode from a silent fallback to hashing embeddings.
+    """
+    embedder = get_embedder()
+    return {
+        "status": "ok",
+        "embedding_backend": embedder.describe(),
+        "semantic_embeddings": embedder.semantic,
+    }
 
 
 @app.post("/generate", response_model=GenerateResponse)

@@ -1,0 +1,95 @@
+name: tests
+
+# The point of this workflow is not only "do the tests pass" but "does the
+# project work for a stranger who has no API keys and no Ollama". GitHub's
+# runners have neither, so the default environment IS the test: any accidental
+# dependency on a local config.yaml or a reachable Ollama shows up as a failure
+# here rather than as a broken first experience for someone cloning the repo.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: pytest (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Assert the keyless / offline preconditions actually hold
+        # Guards the claim rather than trusting it. kernel/config.yaml is
+        # gitignored so a clean checkout must not have one, and nothing should
+        # be listening on Ollama's port.
+        run: |
+          test ! -f kernel/config.yaml || { echo "::error::kernel/config.yaml is present; this run would not prove the keyless path"; exit 1; }
+          if curl -sf --max-time 3 http://localhost:11434/api/tags > /dev/null 2>&1; then
+            echo "::error::Ollama is reachable; this run would not prove the offline path"; exit 1
+          fi
+          echo "no config.yaml, no Ollama - the fallback path is what will be exercised"
+
+      - name: Verify the embedding fallback selects the offline backend
+        # If this ever silently picked Ollama, the suite below would be testing
+        # something other than what a fresh clone gets.
+        run: |
+          python - <<'PY'
+          from kernel.memory.embeddings import build_embedder, HashingEmbedder
+          e = build_embedder()
+          assert isinstance(e, HashingEmbedder), f"expected HashingEmbedder, got {type(e).__name__}"
+          print("embedding fallback ->", e.describe())
+          PY
+
+      - name: Run test suite
+        run: python -m pytest tests/ -v
+
+      - name: Verify the benchmarks run headless
+        # scheduler_bench is pure-Python and fast; it also exercises matplotlib
+        # under the Agg backend, which is the part most likely to break on a
+        # machine with no display.
+        run: python -m benchmarks.scheduler_bench
+
+  dashboard:
+    name: next build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Build
+        working-directory: dashboard
+        # The dashboard fetches the backend at runtime, not at build time, so
+        # this needs no API to be up — it catches type errors and broken imports.
+        run: npm run build

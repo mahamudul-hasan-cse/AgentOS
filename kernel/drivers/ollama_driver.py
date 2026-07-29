@@ -1,4 +1,5 @@
 import asyncio
+import os
 
 import requests
 
@@ -10,7 +11,11 @@ class OllamaDriver(LLMDriver):
 
     def __init__(self):
         super().__init__()
-        self.host: str = self.config.get("host", "http://localhost:11434")
+        # AIOS_OLLAMA_HOST wins over config: inside a container the mounted
+        # config.yaml points at the host's localhost, not the Ollama service.
+        self.host: str = os.environ.get("AIOS_OLLAMA_HOST") or self.config.get(
+            "host", "http://localhost:11434"
+        )
         self.model: str = self.config.get("model", "llama3")
 
     def is_available(self) -> bool:

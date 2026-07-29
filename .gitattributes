@@ -1,0 +1,18 @@
+# Line endings.
+#
+# Docker builds and GitHub Actions runners are Linux. A Dockerfile, an entrypoint
+# script, or a shell heredoc inside a workflow that arrives with CRLF fails there
+# in confusing ways ("/bin/sh^M: bad interpreter"), and Git on Windows will
+# happily convert them on checkout unless told otherwise. Pin the files that
+# cross into Linux to LF regardless of the cloner's core.autocrlf setting.
+
+Dockerfile        text eol=lf
+*.dockerfile      text eol=lf
+.dockerignore     text eol=lf
+docker-compose.yml text eol=lf
+*.yml             text eol=lf
+*.yaml            text eol=lf
+*.sh              text eol=lf
+
+# Binary artifacts: never touch, never diff as text.
+*.png binary

@@ -1,5 +1,7 @@
 # AIOS
 
+[![tests](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml/badge.svg)](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml)
+
 AIOS is an **LLM Agent Operating System simulator** built for an Operating Systems. It reimagines classic OS concepts — process scheduling, virtual memory/paging, syscalls, IPC, and access control — as the management layer for LLM agents, treating each agent request as a process and the LLM context window as physical RAM.
 
 This project is inspired by [agiresearch/AIOS](https://github.com/agiresearch/AIOS) as an architectural reference, but is independently designed and implemented from scratch.
@@ -11,7 +13,79 @@ This project is inspired by [agiresearch/AIOS](https://github.com/agiresearch/AI
 - Config-driven API keys/models loaded from `kernel/config.yaml`
 - A FastAPI `/generate` endpoint (`api/main.py`) that dispatches to the requested driver and **automatically falls back to Ollama** if the primary driver hits a rate limit or connection error
 
-## Setup
+## Quickstart
+
+Two supported paths. **Neither needs an API key** — with no keys configured the
+kernel runs in Ollama-only mode, and with no Ollama either it falls back to a
+built-in offline embedder. Both paths are exercised in CI.
+
+### Option A — Docker (one command)
+
+Requires only Docker. Brings up Ollama, the FastAPI kernel and the dashboard
+together, and pulls the `nomic-embed-text` embedding model on first run.
+
+```bash
+git clone https://github.com/mahamudul-hasan-cse/AIOS.git
+cd AIOS
+docker compose up
+```
+
+Then open **http://localhost:3000**. The API is on http://localhost:8000
+(`/health` reports which embedding backend is live).
+
+First run downloads the Ollama image and the embedding model (~1.5 GB total), so
+it takes a few minutes; subsequent runs start in seconds from cached volumes.
+
+To use your own provider keys, keep them on the host — they are **mounted, never
+baked into the image**:
+
+```bash
+cp kernel/config.yaml.example kernel/config.yaml    # then edit it
+AIOS_CONFIG=./kernel/config.yaml docker compose up
+```
+
+| | |
+|---|---|
+| dashboard | http://localhost:3000 |
+| API | http://localhost:8000 |
+| stop | `docker compose down` |
+| stop and discard stored pages/models | `docker compose down -v` |
+
+<details>
+<summary><b>If port 8000 or 3000 is unavailable</b> (common on Windows)</summary>
+
+Both published ports are overridable:
+
+```bash
+AIOS_API_PORT=8010 AIOS_DASHBOARD_PORT=3001 docker compose up
+```
+
+`AIOS_API_PORT` is the only knob you need for the API — the dashboard's
+API base URL is derived from it automatically.
+
+On Windows this is worth knowing about even when nothing is listening on the
+port: Hyper-V reserves blocks of TCP ports, and 8000 frequently lands inside
+one. The symptom is a bind failure at startup —
+
+```
+Error response from daemon: ports are not available: ... bind:
+An attempt was made to access a socket in a way forbidden by its access permissions.
+```
+
+Check the reserved blocks with:
+
+```powershell
+netsh interface ipv4 show excludedportrange protocol=tcp
+```
+
+If your API port falls inside one of those ranges, pick another. (This was hit
+while verifying the stack on Windows 11 — 8000 sat inside a reserved
+7942–8041 block.)
+</details>
+
+### Option B — Manual install
+
+Requires Python 3.10+ and Node 18+.
 
 ```bash
 git clone https://github.com/mahamudul-hasan-cse/AIOS.git
@@ -23,23 +97,51 @@ venv\Scripts\activate        # Windows
 
 pip install -r requirements.txt
 
-# optional: test runner + headless-browser dashboard verification
+uvicorn api.main:app --reload
+```
+
+In a second terminal:
+
+```bash
+cd dashboard
+npm install
+npm run dev
+```
+
+Open http://localhost:3000.
+
+**Optional extras**, none of which are required to run:
+
+```bash
+# real semantic embeddings + offline LLM fallback
+ollama serve
+ollama pull nomic-embed-text   # embeddings for the memory manager / semantic FS
+ollama pull llama3             # offline/fallback LLM driver
+
+# provider API keys (Groq / Gemini / DeepSeek)
+cp kernel/config.yaml.example kernel/config.yaml   # then edit
+
+# test runner + headless-browser dashboard verification
 pip install -r requirements-dev.txt
 python -m playwright install chromium chromium-headless-shell
+python -m pytest tests/
 ```
+
+Without `nomic-embed-text` the kernel automatically uses a built-in hashing
+embedder, so a fresh clone works offline with zero setup — but similarity then
+reflects shared vocabulary rather than meaning. Whichever backend is active is
+logged at startup and reported by `GET /health`.
 
 Dependencies are split deliberately: `requirements.txt` is what the kernel needs
 to **run**, `requirements-dev.txt` is what you need to **verify** it (pytest,
 playwright). Nothing in the dev file is imported by `kernel/`, `api/`, `agents/`
 or `shell/`.
 
-`kernel/config.yaml` is gitignored (it holds real API keys). Copy the template and fill in your keys:
+### Configuration
 
-```bash
-cp kernel/config.yaml.example kernel/config.yaml   # then edit kernel/config.yaml
-```
-
-The file has this structure:
+`kernel/config.yaml` is gitignored because it holds real API keys; the tracked
+`kernel/config.yaml.example` is the template and is what Docker mounts by
+default. Structure:
 
 ```yaml
 groq:
@@ -57,23 +159,16 @@ deepseek:
 ollama:
   host: "http://localhost:11434"
   model: "llama3"
+
+embeddings:
+  backend: "ollama"
+  model: "nomic-embed-text"
 ```
 
-Make sure [Ollama](https://ollama.com) is running locally with a pulled model (used as the offline/fallback driver), plus an embedding model used by the memory manager and semantic file system:
-
-```bash
-ollama serve
-ollama pull llama3             # offline/fallback LLM driver
-ollama pull nomic-embed-text   # real semantic embeddings
-```
-
-The embedding model is optional: without it the kernel automatically falls back to a built-in hashing embedder, so a fresh clone works offline with zero setup — but similarity then reflects shared vocabulary rather than meaning. Whichever backend is active is logged at startup.
-
-Start the API server:
-
-```bash
-uvicorn api.main:app --reload
-```
+One environment variable overrides the file: **`AIOS_OLLAMA_HOST`** takes
+precedence over `ollama.host`, because a config written for a host install says
+`localhost`, which inside a container points at the container itself. Compose
+sets it to `http://ollama:11434`.
 
 ## Dashboard
 
@@ -83,17 +178,10 @@ color-coded state badges, a recharts Gantt chart of the last schedule run, a
 memory panel showing pages in RAM vs. swapped to ChromaDB, and a live syscall
 trace. All panels poll the backend every 2 seconds.
 
-Run the FastAPI backend on port 8000, then in a second terminal:
-
-```bash
-cd dashboard
-npm install
-npm run dev
-```
-
-Open http://localhost:3000. The backend enables CORS for `http://localhost:3000`
-and seeds demo scheduler/memory state on startup so the panels are populated
-immediately. See [`dashboard/README.md`](dashboard/README.md) for details.
+See the [Quickstart](#quickstart) above for how to start it (Docker brings it
+up automatically). The backend allows CORS from any localhost port and seeds
+demo scheduler/memory state on startup, so the panels are populated on first
+load. See [`dashboard/README.md`](dashboard/README.md) for details.
 
 ## Evaluation
 

@@ -1,0 +1,21 @@
+# Never ship secrets or host state into an image.
+kernel/config.yaml
+.env
+
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+chroma_db/
+fs_root/
+
+dashboard/node_modules/
+dashboard/.next/
+
+.git/
+.github/
+tests/
+benchmarks/results/
+*.md
+!README.md
