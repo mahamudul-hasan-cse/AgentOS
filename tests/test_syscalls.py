@@ -78,10 +78,9 @@ def test_mem_write_then_read_through_dispatcher(dispatcher):
     assert all(s.status == SyscallStatus.SUCCESS for s in dispatcher.log)
 
 
-def test_unimplemented_syscall_logs_not_implemented_without_crashing(dispatcher):
-    # agent-3 is a plain USER-level agent. Per ENOSYS-before-EPERM semantics,
-    # an unimplemented syscall returns NOT_IMPLEMENTED regardless of privilege
-    # (the handler-existence check runs before access control).
+def test_unknown_tool_call_logs_not_implemented_without_crashing(dispatcher):
+    # TOOL_CALL is implemented for kernel-approved tools only. Unknown tools
+    # remain NOT_IMPLEMENTED and are logged without crashing the dispatcher.
     syscall = run(dispatcher.dispatch("agent-3", SyscallType.TOOL_CALL, tool="search"))
 
     assert syscall.status == SyscallStatus.NOT_IMPLEMENTED
@@ -91,7 +90,7 @@ def test_unimplemented_syscall_logs_not_implemented_without_crashing(dispatcher)
     assert logged.type == SyscallType.TOOL_CALL
     assert logged.status == SyscallStatus.NOT_IMPLEMENTED
 
-    # the dispatcher is still fully usable after an unimplemented syscall
+    # the dispatcher is still fully usable after an unknown tool syscall
     follow_up = run(
         dispatcher.dispatch("agent-3", SyscallType.LLM_CALL, prompt="still alive?", driver="fake")
     )

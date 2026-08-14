@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from agents import run_collaboration
+from agents import PipelineRunner, run_collaboration
 from kernel.memory import get_embedder
 from kernel.scheduler import DEFAULT_MLFQ_QUANTUMS, Process, Scheduler, UnknownAlgorithmError
 from kernel.syscalls import Syscall, SyscallDispatcher, SyscallStatus, SyscallType
@@ -21,6 +21,14 @@ page_manager = dispatcher.page_manager
 # here for the dashboard; the processes themselves are read live from the
 # scheduler's queue.
 scheduler_state: dict = {"timeline": [], "algorithm": None}
+pipeline_state: dict = {
+    "status": "idle",
+    "current_stage": None,
+    "stages": [],
+    "final_report": None,
+    "tester": None,
+    "events": [],
+}
 
 
 def _process_to_dict(p: Process) -> dict:
@@ -469,6 +477,53 @@ async def agents_collaborate(request: CollaborateRequest) -> CollaborateResponse
         blackboard=result["blackboard"],
         final_output=result["final_output"],
     )
+
+
+class PipelineRunRequest(BaseModel):
+    topic: str
+    driver: str = "groq"
+
+
+@app.post("/pipeline/run")
+async def pipeline_run(request: PipelineRunRequest) -> dict:
+    """Run the flagship research -> code -> test -> report pipeline.
+
+    The endpoint returns once the run completes, while /pipeline/status exposes
+    the latest stage status for the shell and dashboard to poll.
+    """
+    global pipeline_state
+    pipeline_state = {
+        "status": "starting",
+        "current_stage": "coordinator",
+        "stages": [],
+        "final_report": None,
+        "tester": None,
+        "events": [],
+    }
+
+    def publish(update: dict) -> None:
+        global pipeline_state
+        pipeline_state = update
+
+    runner = PipelineRunner(dispatcher, on_update=publish)
+    result = await runner.run(request.topic, driver=request.driver)
+    pipeline_state = result
+    return {
+        "process_tree": result["process_tree"],
+        "final_report": result["final_report"],
+        "tester": result["tester"],
+        "run_id": result["run_id"],
+        "status": result["status"],
+        "stages": result["stages"],
+        "events": result["events"],
+        "sandbox_review_note": result["sandbox_review_note"],
+    }
+
+
+@app.get("/pipeline/status")
+def pipeline_status() -> dict:
+    """Latest pipeline stage status, suitable for live polling."""
+    return pipeline_state
 
 
 class ResourceStateResponse(BaseModel):

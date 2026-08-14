@@ -2,6 +2,7 @@ import { API_BASE } from "@/lib/api";
 import { Deadlock } from "@/components/Deadlock";
 import { GanttChart } from "@/components/GanttChart";
 import { MemoryView } from "@/components/MemoryView";
+import { Pipeline } from "@/components/Pipeline";
 import { ProcessTable } from "@/components/ProcessTable";
 import { ProcessTree } from "@/components/ProcessTree";
 import { SyscallTrace } from "@/components/SyscallTrace";
@@ -36,6 +37,7 @@ export default function Home() {
           <MemoryView />
           <SyscallTrace />
           <Deadlock />
+          <Pipeline />
         </div>
       </TimeTravelProvider>
     </main>

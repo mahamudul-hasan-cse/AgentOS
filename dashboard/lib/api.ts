@@ -92,3 +92,62 @@ export function colorForPid(pid: string): string {
   }
   return PALETTE[Math.abs(hash) % PALETTE.length];
 }
+
+// --- flagship pipeline -------------------------------------------------------
+
+export interface PipelineEvent {
+  syscall_id?: string;
+  type?: string;
+  status?: string;
+  error?: string | null;
+  [key: string]: unknown;
+}
+
+export interface PipelineStage {
+  stage: string;
+  agent_id: string;
+  status: string;
+  produced: string | null;
+  file: string | null;
+  driver_used: string | null;
+  error: string | null;
+  quota_events: PipelineEvent[];
+  resource_events: PipelineEvent[];
+}
+
+export interface PipelineTester {
+  passed: boolean;
+  exit_code: number | null;
+  stdout: string;
+  stderr: string;
+  timeout: boolean;
+  rejected: boolean;
+  duration_ms?: number;
+  sandbox?: Record<string, unknown>;
+}
+
+export interface PipelineStatus {
+  run_id?: string;
+  topic?: string;
+  coordinator_id?: string;
+  status: string;
+  current_stage: string | null;
+  stages: PipelineStage[];
+  final_report: string | null;
+  tester: PipelineTester | null;
+  events: PipelineEvent[];
+  sandbox_review_note?: string;
+}
+
+export const fetchPipelineStatus = () =>
+  getJSON<PipelineStatus>("/pipeline/status");
+
+export async function runPipeline(topic: string): Promise<PipelineStatus> {
+  const res = await fetch(`${API_BASE}/pipeline/run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ topic }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}

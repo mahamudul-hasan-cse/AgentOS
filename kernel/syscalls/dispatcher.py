@@ -96,6 +96,7 @@ class SyscallDispatcher:
         self.log: List[Syscall] = []
         self._handlers: Dict[SyscallType, Callable] = {
             SyscallType.LLM_CALL: self._handle_llm_call,
+            SyscallType.TOOL_CALL: self._handle_tool_call,
             SyscallType.MEM_READ: self._handle_mem_read,
             SyscallType.MEM_WRITE: self._handle_mem_write,
             SyscallType.IPC_SEND: self._handle_ipc_send,
@@ -337,6 +338,31 @@ class SyscallDispatcher:
             "page_fault": result.page_fault,
             "evicted_page_id": result.evicted_page_id,
         }
+
+
+    async def _handle_tool_call(
+        self,
+        agent_id: str,
+        tool: str,
+        code: Optional[str] = None,
+        timeout_seconds: float = 3.0,
+        **_,
+    ) -> Dict[str, Any]:
+        """Run a deliberately small set of kernel-approved tools.
+
+        The pipeline tester uses this for generated Python execution so the
+        subprocess run is attributable in the syscall trace. Unknown tools stay
+        explicit errors rather than becoming an escape hatch.
+        """
+        if tool != "python_sandbox":
+            raise NotImplementedError(f"Tool '{tool}' is not implemented")
+        if code is None:
+            raise ValueError("python_sandbox requires 'code'")
+
+        from kernel.sandbox import run_python_sandbox
+
+        result = run_python_sandbox(code, timeout_seconds=timeout_seconds)
+        return {"tool": tool, "agent_id": agent_id, **result}
 
     async def _handle_ipc_send(
         self, agent_id: str, to_agent: str, content: Any, **_

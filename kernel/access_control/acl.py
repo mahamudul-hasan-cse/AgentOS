@@ -33,6 +33,7 @@ class AccessDenied(Exception):
 USER_ALLOWED_SYSCALLS = frozenset(
     {
         SyscallType.LLM_CALL,
+        SyscallType.TOOL_CALL,
         SyscallType.MEM_READ,
         SyscallType.MEM_WRITE,
         SyscallType.IPC_SEND,

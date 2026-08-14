@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
@@ -72,8 +73,9 @@ def _detail(resp: requests.Response) -> str:
 def api(ctx: Context, method: str, path: str, **kwargs) -> object:
     """Call the backend and return parsed JSON, or raise a friendly ShellError."""
     url = ctx.base_url.rstrip("/") + path
+    timeout = kwargs.pop("timeout", REQUEST_TIMEOUT)
     try:
-        resp = ctx.session.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
+        resp = ctx.session.request(method, url, timeout=timeout, **kwargs)
     except requests.exceptions.ConnectionError:
         raise ShellError(f"cannot connect to backend at {ctx.base_url} (is it running?)")
     except requests.exceptions.Timeout:
@@ -416,6 +418,82 @@ def handle_run(ctx: Context, args: List[str]) -> None:
     print(f"[{result['driver_used']}] {result['text']}")
 
 
+def handle_pipeline(ctx: Context, args: List[str]) -> None:
+    """pipeline <task> — run the research->code->test->report demo."""
+    topic = args[0]
+    result_box: dict = {}
+
+    def worker() -> None:
+        try:
+            result_box["result"] = api(
+                ctx,
+                "POST",
+                "/pipeline/run",
+                json={"topic": topic},
+                timeout=180,
+            )
+        except Exception as exc:  # noqa: BLE001 - surfaced after join
+            result_box["error"] = exc
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    print("pipeline started: researcher -> coder -> tester -> writer")
+
+    seen: dict = {}
+    while thread.is_alive():
+        try:
+            status = api(ctx, "GET", "/pipeline/status")
+            _print_pipeline_status(status, seen)
+        except ShellError:
+            pass
+        time.sleep(0.75)
+    thread.join()
+
+    if "error" in result_box:
+        error = result_box["error"]
+        if isinstance(error, ShellError):
+            raise error
+        raise ShellError(str(error))
+
+    result = result_box.get("result", {})
+    _print_pipeline_status(result, seen)
+    tester = result.get("tester") or {}
+    verdict = "PASS" if tester.get("passed") else "FAIL"
+    print(f"\nfinal tester verdict: {verdict}")
+    if tester:
+        print(f"exit={tester.get('exit_code')} timeout={tester.get('timeout')} rejected={tester.get('rejected')}")
+        stdout = (tester.get("stdout") or "").strip()
+        stderr = (tester.get("stderr") or "").strip()
+        if stdout:
+            print(f"stdout: {stdout[:300]}")
+        if stderr:
+            print(f"stderr: {stderr[:300]}")
+    print("\nfinal report:\n")
+    print(result.get("final_report") or "(no report produced)")
+
+
+def _print_pipeline_status(status: dict, seen: dict) -> None:
+    for stage in status.get("stages", []):
+        key = stage["stage"]
+        marker = (
+            stage.get("status"),
+            stage.get("produced"),
+            len(stage.get("quota_events") or []),
+            len(stage.get("resource_events") or []),
+        )
+        if seen.get(key) == marker:
+            continue
+        seen[key] = marker
+        produced = f" -> {stage['produced']}" if stage.get("produced") else ""
+        print(f"[{stage['status']}] {stage['stage']} ({stage['agent_id']}){produced}")
+        if stage.get("file"):
+            print(f"  file: {stage['file']}")
+        for event in stage.get("quota_events") or []:
+            print(f"  quota event: {event.get('type')} {event.get('status')} - {event.get('error')}")
+        for event in stage.get("resource_events") or []:
+            print(f"  resource/event: {event.get('type')} {event.get('status')} - {event.get('error')}")
+
+
 def handle_help(ctx: Context, args: List[str]) -> None:
     print("commands:")
     for name in COMMAND_ORDER:
@@ -474,6 +552,7 @@ _register(Command("deadlock", handle_deadlock, "tokens", 0, 1, "deadlock [detect
 _register(Command("mode", handle_mode, "tokens", 1, 1, "mode <on|off>", "toggle deadlock avoidance"))
 _register(Command("strace", handle_strace, "tokens", 0, 1, "strace [n]", "recent syscalls (default 20)"))
 _register(Command("run", handle_run, "rest", 1, 1, "run <prompt>", "LLM_CALL via /generate"))
+_register(Command("pipeline", handle_pipeline, "rest", 1, 1, "pipeline <task>", "run research->code->test->report pipeline"))
 _register(Command("help", handle_help, "none", 0, 0, "help", "show this help"))
 _register(Command("exit", handle_exit, "none", 0, 0, "exit", "leave the shell"))
 _register(Command("quit", handle_exit, "none", 0, 0, "quit", "leave the shell"))

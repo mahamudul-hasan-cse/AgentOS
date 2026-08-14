@@ -11,6 +11,7 @@ from shell.repl import (
     handle_find,
     handle_kill,
     handle_mem,
+    handle_pipeline,
     handle_ps,
     handle_run,
     handle_strace,
@@ -28,6 +29,7 @@ def test_every_command_resolves_to_its_handler():
         "mem": handle_mem,
         "strace": handle_strace,
         "run": handle_run,
+        "pipeline": handle_pipeline,
     }
     for name, handler in expected.items():
         res = resolve(name if name in ("ps",) else f"{name} x")
@@ -60,10 +62,14 @@ def test_optional_arg_commands():
 
 
 def test_rest_of_line_commands_keep_the_whole_remainder():
-    # 'run' and 'find' take the entire remainder as one argument
+    # 'run', 'pipeline' and 'find' take the entire remainder as one argument
     r = resolve("run write a haiku about paging")
     assert r.ok and r.command.name == "run"
     assert r.args == ["write a haiku about paging"]
+
+    p = resolve("pipeline build a tiny calculator")
+    assert p.ok and p.command.name == "pipeline"
+    assert p.args == ["build a tiny calculator"]
 
     f = resolve("find how do plants make energy")
     assert f.ok and f.args == ["how do plants make energy"]
@@ -73,7 +79,7 @@ def test_rest_of_line_commands_keep_the_whole_remainder():
 
 
 def test_missing_required_args_produce_clear_errors_not_exceptions():
-    for line in ("kill", "mem", "cat", "find", "run"):
+    for line in ("kill", "mem", "cat", "find", "run", "pipeline"):
         res = resolve(line)
         assert not res.ok
         assert res.error is not None
