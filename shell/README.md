@@ -1,7 +1,10 @@
-# AgentOS-Lite Shell
+# AIOS Shell (AgentOS-Lite REPL)
 
-An interactive, Unix-style REPL over the kernel's HTTP API — the primary demo
-surface. Every command maps onto an existing endpoint.
+An interactive, Unix-style REPL over the kernel's HTTP API — the primary CLI demo surface. Every command maps onto an existing endpoint.
+
+## Identity (read this first)
+
+The shell's **`--agent` flag declares who you claim to be** — it is not authenticated. Default `root` is KERNEL-privileged because the kernel trusts the string, not because the shell proved anything. Any user can run `python shell/repl.py --agent root`. See the **Security & Identity Model** section in the root [`README.md`](../README.md).
 
 ## Running
 
@@ -20,8 +23,7 @@ python shell/repl.py --agent alice                    # act as a USER-level agen
 ```
 
 - `--url` sets the backend base URL (default `http://localhost:8000`).
-- `--agent` sets the identity the shell acts as (default `root`, which is
-  KERNEL-privileged). Run as another agent to demo permission differences.
+- `--agent` sets the identity the shell acts as (default `root`, which is KERNEL-privileged). Run as another agent to demo permission differences.
 
 ## Commands
 
@@ -29,7 +31,7 @@ python shell/repl.py --agent alice                    # act as a USER-level agen
 |--------------------|-----------------------------------|------------------------------------------|
 | `ps`               | `GET /scheduler/state`            | process table (PID/STATE/ARRIVAL/…)      |
 | `top`              | `GET /scheduler/state` + `/resources/state` | auto-refresh every 2s (Ctrl+C to stop) |
-| `kill [-t] <pid>`  | `POST /scheduler/terminate/{pid}` | terminate a process (`-t` = whole subtree)|
+| `kill [-t] <pid>`  | `POST /scheduler/terminate/{pid}` or `/kill-tree/{pid}` | terminate a process (`-t` = whole subtree) |
 | `limits [agent]`   | `GET /quotas/{agent}`             | quota usage vs limit (pages + call rate) |
 | `ls [agent]`       | `GET /fs/list/{agent}`            | list an agent's files                    |
 | `cat <filename>`   | `GET /fs/read`                    | print a file's contents                  |
@@ -39,44 +41,33 @@ python shell/repl.py --agent alice                    # act as a USER-level agen
 | `pstree`           | `GET /scheduler/tree`             | process hierarchy as an ASCII tree       |
 | `spawn [pid]`      | `POST /scheduler/spawn`           | fork a child process                     |
 | `wait <p> [child]` | `POST /scheduler/wait/{pid}`      | reap a zombie child, read its exit status|
-| `deadlock [detect]`| `GET /deadlock/status` + `/graph` | wait-for graph and cycle status          |
-| `mode <on\|off>`    | `POST /resources/mode`            | toggle deadlock avoidance                |
+| `deadlock [detect]`| `GET /deadlock/status` + `/graph` | wait-for graph and cycle status (`detect` forces `POST /deadlock/detect`) |
+| `mode <on\|off>`    | `POST /resources/mode`            | toggle deadlock avoidance (Banker's)     |
 | `run <prompt>`     | `POST /generate`                  | issue an LLM_CALL, shows serving driver  |
+| `pipeline <task>`  | `POST /pipeline/run` + `GET /pipeline/status` | run research→code→test→report; prints live stage status |
 | `help`             | —                                 | list commands                            |
 | `exit` / `quit`    | —                                 | leave the shell                          |
 
-Commands that default to an agent (`limits`, `ls`) use the shell's `--agent`
-identity when no argument is given.
+Commands that default to an agent (`limits`, `ls`) use the shell's `--agent` identity when no argument is given.
 
 ## Example session
 
 ```
 $ python shell/repl.py
-AgentOS-Lite shell  —  http://localhost:8000  (agent: root)
+AgentOS-Lite shell  -  http://localhost:8000  (agent: root)
 type 'help' for commands, 'exit' to quit.
 
 aios:root$ ps
-PID  STATE       ARRIVAL  REMAINING  PRIO
----  ----------  -------  ---------  ----
-P1   terminated  0        0          1
-P2   running     1        1          2
-P3   ready       2        8          0
-P4   waiting     3        2          1
+PID  PPID  STATE       ARRIVAL  REMAINING  PRIO  EXIT
+---  ----  ----------  -------  ---------  ----  ----
+P1   -     terminated  0        0          1     -
+P2   -     running     1        1          2     -
 
-aios:root$ kill P2
-killed 'P2'
-
-aios:root$ limits demo
-quotas for 'demo':
-RESOURCE          USED  LIMIT
-----------------  ----  -----
-memory pages      7     20
-LLM calls / 60s   0     10
-
-aios:root$ find how do plants make energy
-FILE         SCORE  SNIPPET
------------  -----  ------------------------------------------
-note_a.txt   0.477  Plants perform photosynthesis, converting …
+aios:root$ pipeline write a function that adds two numbers and prints the result
+pipeline started: researcher -> coder -> tester -> writer
+[running] researcher (pipeline-researcher-...)
+...
+final tester verdict: PASS
 
 aios:root$ run say hello in one word
 [groq] Hello.
@@ -90,8 +81,7 @@ TIME      AGENT   SYSCALL     STATUS   LATENCY
 
 ## Permission demo
 
-Run the shell as a USER-level agent and watch privileged operations get
-rejected cleanly:
+Run the shell as a USER-level agent and watch privileged operations get rejected cleanly:
 
 ```
 $ python shell/repl.py --agent mallory
@@ -99,25 +89,18 @@ aios:mallory$ kill P1
 permission denied: USER-level agent 'mallory' may not terminate process 'P1' (requires KERNEL privilege)
 ```
 
-Errors are always printed as a clean one-liner — `403 → permission denied`,
-`429 → quota exceeded`, `404 → not found` — never a raw traceback.
-```
+Errors are always printed as a clean one-liner — `403 → permission denied`, `429 → quota exceeded`, `404 → not found` — never a raw traceback.
 
 ## Demoing deadlock detection
 
-Deadlock **avoidance** (Banker's Algorithm) is on by default, and while it is on
-the detector correctly finds nothing - the two are alternative strategies, not
-layers. To demo detection:
+Deadlock **avoidance** (Banker's Algorithm) is on by default, and while it is on the detector correctly finds nothing — the two are alternative strategies, not layers. To demo detection:
 
 ```
 aios:root$ mode off        # greedy granting; real circular waits can now form
 aios:root$ deadlock        # wait-for graph + cycle status
 ```
 
-Turning avoidance off also starts a background scan that **auto-recovers** any
-cycle it finds, within one interval. The default interval is 5s, which can make
-a deadlock vanish before you can look at it. For a demo, raise it in
-`kernel/config.yaml`:
+Turning avoidance off also starts a background scan that **auto-recovers** any cycle it finds, within one interval. The default interval is 5s, which can make a deadlock vanish before you can look at it. For a demo, raise it in `kernel/config.yaml`:
 
 ```yaml
 deadlock:

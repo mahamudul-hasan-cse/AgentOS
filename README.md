@@ -2,27 +2,58 @@
 
 [![tests](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml/badge.svg)](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml)
 
-AIOS is an **LLM Agent Operating System simulator** built for an Operating Systems. It reimagines classic OS concepts — process scheduling, virtual memory/paging, syscalls, IPC, and access control — as the management layer for LLM agents, treating each agent request as a process and the LLM context window as physical RAM.
+AIOS is an **LLM Agent Operating System simulator** built for an Operating Systems course project. It reimagines classic OS concepts — process scheduling, virtual memory/paging, syscalls, IPC, access control, deadlocks, and resource allocation — as the management layer for LLM agents, treating each agent request as a process and the LLM context window as physical RAM.
+
+The dashboard UI uses the working name **AgentOS-Lite**; the repository and environment variables use **AIOS**.
 
 This project is inspired by [agiresearch/AIOS](https://github.com/agiresearch/AIOS) as an architectural reference, but is independently designed and implemented from scratch.
 
-## Features implemented so far
+## Security & Identity Model
 
-**Phase 1 — LLM driver abstraction layer**
-- A single `LLMDriver` interface (`kernel/drivers/base.py`) with four hardware-abstraction-layer-style implementations: `GroqDriver`, `DeepSeekDriver`, `GeminiDriver`, `OllamaDriver`
-- Config-driven API keys/models loaded from `kernel/config.yaml`
-- A FastAPI `/generate` endpoint (`api/main.py`) that dispatches to the requested driver and **automatically falls back to Ollama** if the primary driver hits a rate limit or connection error
+**Read this before interpreting any ACL, quota, or deadlock demo.**
+
+Agent identity in AIOS is **caller-declared, not authenticated**. There is no login, token, or credential that proves who an agent is.
+
+- Every syscall and most HTTP endpoints accept an **`agent_id`** field (or shell **`--agent`** flag) naming who the caller claims to be.
+- The kernel's ACL then enforces **privilege rules based on that unverified claim**: a caller saying `agent_id=root` is treated as KERNEL-privileged; a caller saying `agent_id=mallory` is treated as USER-level.
+- **Any client can claim to be `root` or any other agent.** Nothing stops a modified HTTP request or `python shell/repl.py --agent root` from acting as the built-in admin identity.
+- Several dashboard **read** endpoints (`GET /scheduler/state`, `/memory/state/{agent}`, `/syscalls/log`, `/resources/state`, `/fs/list/{agent}`) expose kernel state **without going through the syscall ACL at all**, so they are world-readable to whoever can reach the API.
+
+This is **appropriate for a local, single-user kernel simulator** where the goal is to *demonstrate* OS mechanisms (privilege levels, quotas, Banker's avoidance, wait-for graphs) in a controlled environment. It is **not a real security boundary** and must not be mistaken for authentication, authorization against hostile users, or multi-tenant isolation.
+
+**Generated-code execution** (pipeline tester via `TOOL_CALL` / `python_sandbox`) uses a **course-project-grade subprocess safeguard** (AST deny-list, timeout, scratch directory, process-group kill) — not a hardened sandbox. See `kernel/sandbox.py` and the pipeline's `sandbox_review_note` output.
+
+## What is built (phases 1–23)
+
+[`PROJECT_PLAN.md` §5](PROJECT_PLAN.md#5-build-roadmap-commit-history) lists every phase **using the same numbers as `git log --oneline --grep=Phase`**. Phases **1–21 are committed** (note: there is no Phase 8 tag). Phase **22** (Groq/Gemini timeouts, sandbox thread offload) is implemented but not yet committed. Phase **23** is this documentation sync. Highlights:
+
+| Area | What you get |
+|------|----------------|
+| **LLM drivers** | `GroqDriver`, `DeepSeekDriver`, `GeminiDriver`, `OllamaDriver` with explicit timeouts and automatic **Groq/DeepSeek/Gemini → Ollama** fallback |
+| **Scheduler** | FCFS, Round Robin, Priority, MLFQ, plus **priority aging** and **MLFQ boost** starvation variants; process tree with spawn/wait/zombies/kill-tree |
+| **Memory** | Paged context window, FIFO/LRU/**Semantic-LRU**, ChromaDB swap, **copy-on-write** fork semantics |
+| **Syscalls** | Full dispatcher choke point, ENOSYS-before-EPERM, syscall trace, quotas, `TOOL_CALL` sandbox |
+| **IPC** | Async message queue + shared blackboard (used by pipeline and legacy collaborate demo) |
+| **Access control** | KERNEL vs USER privilege, per-agent page and LLM-call-rate quotas |
+| **Resources / deadlock** | Banker's Algorithm avoidance (default) **or** detection + recovery when avoidance is off |
+| **Semantic FS** | Per-agent files with embedding search (`/fs/*`) |
+| **Flagship pipeline** | Researcher → Coder → Tester → Writer, kernel-governed via syscalls (`POST /pipeline/run`) |
+| **Kernel assistant** | In-kernel chat agent with doc search (`/assistant/*`, dashboard Chat panel) |
+| **Time travel** | Ring-buffer kernel snapshots (`/replay/*`, dashboard scrubber) |
+| **Shell** | Interactive REPL over the HTTP API — primary CLI demo ([`shell/README.md`](shell/README.md)) |
+| **Dashboard** | Process table, Gantt, process tree, memory (with COW stats), syscall trace, deadlock panel, pipeline panel, assistant chat, embedding health badge |
+| **Benchmarks** | Seeded scheduler, memory, Belady, and COW evaluation suites ([`benchmarks/README.md`](benchmarks/README.md)) |
+| **Reliability** | Non-blocking startup with `/health`, configurable embedding fallback, driver timeouts, sandbox offloaded from the event loop |
+
+Full phase-by-phase history: [`PROJECT_PLAN.md` §5](PROJECT_PLAN.md#5-build-roadmap-commit-history).
 
 ## Quickstart
 
-Two supported paths. **Neither needs an API key** — with no keys configured the
-kernel runs in Ollama-only mode, and with no Ollama either it falls back to a
-built-in offline embedder. Both paths are exercised in CI.
+Two supported paths. **Neither needs an API key** — with no keys configured the kernel runs in Ollama-only mode, and with no Ollama either it falls back to a built-in offline embedder. Both paths are exercised in CI.
 
 ### Option A — Docker (one command)
 
-Requires only Docker. Brings up Ollama, the FastAPI kernel and the dashboard
-together, and pulls the `nomic-embed-text` embedding model on first run.
+Requires only Docker. Brings up Ollama, the FastAPI kernel, and the dashboard together, and pulls the `nomic-embed-text` embedding model on first run.
 
 ```bash
 git clone https://github.com/mahamudul-hasan-cse/AIOS.git
@@ -30,14 +61,11 @@ cd AIOS
 docker compose up
 ```
 
-Then open **http://localhost:3000**. The API is on http://localhost:8000
-(`/health` reports which embedding backend is live).
+Then open **http://localhost:3000**. The API is on http://localhost:8000 (`GET /health` reports embedding backend and startup step status).
 
-First run downloads the Ollama image and the embedding model (~1.5 GB total), so
-it takes a few minutes; subsequent runs start in seconds from cached volumes.
+First run downloads the Ollama image and the embedding model (~1.5 GB total), so it takes a few minutes; subsequent runs start in seconds from cached volumes.
 
-To use your own provider keys, keep them on the host — they are **mounted, never
-baked into the image**:
+To use your own provider keys, keep them on the host — they are **mounted, never baked into the image**:
 
 ```bash
 cp kernel/config.yaml.example kernel/config.yaml    # then edit it
@@ -60,12 +88,9 @@ Both published ports are overridable:
 AIOS_API_PORT=8010 AIOS_DASHBOARD_PORT=3001 docker compose up
 ```
 
-`AIOS_API_PORT` is the only knob you need for the API — the dashboard's
-API base URL is derived from it automatically.
+`AIOS_API_PORT` is the only knob you need for the API — the dashboard's API base URL is derived from it automatically.
 
-On Windows this is worth knowing about even when nothing is listening on the
-port: Hyper-V reserves blocks of TCP ports, and 8000 frequently lands inside
-one. The symptom is a bind failure at startup —
+On Windows this is worth knowing about even when nothing is listening on the port: Hyper-V reserves blocks of TCP ports, and 8000 frequently lands inside one. The symptom is a bind failure at startup —
 
 ```
 Error response from daemon: ports are not available: ... bind:
@@ -78,9 +103,7 @@ Check the reserved blocks with:
 netsh interface ipv4 show excludedportrange protocol=tcp
 ```
 
-If your API port falls inside one of those ranges, pick another. (This was hit
-while verifying the stack on Windows 11 — 8000 sat inside a reserved
-7942–8041 block.)
+If your API port falls inside one of those ranges, pick another. (This was hit while verifying the stack on Windows 11 — 8000 sat inside a reserved 7942–8041 block.)
 </details>
 
 ### Option B — Manual install
@@ -97,7 +120,7 @@ venv\Scripts\activate        # Windows
 
 pip install -r requirements.txt
 
-uvicorn api.main:app --reload
+uvicorn api.main:app --reload --port 8000
 ```
 
 In a second terminal:
@@ -105,10 +128,12 @@ In a second terminal:
 ```bash
 cd dashboard
 npm install
+set NEXT_PUBLIC_API_BASE=http://localhost:8000   # Windows cmd
+# export NEXT_PUBLIC_API_BASE=http://localhost:8000   # macOS/Linux
 npm run dev
 ```
 
-Open http://localhost:3000.
+Open http://localhost:3000. If the API runs on a non-default port, set `NEXT_PUBLIC_API_BASE` to match (the dashboard build default in code is `8012` when unset — always set this env var for manual dev unless your API listens on 8012).
 
 **Optional extras**, none of which are required to run:
 
@@ -121,74 +146,57 @@ ollama pull llama3             # offline/fallback LLM driver
 # provider API keys (Groq / Gemini / DeepSeek)
 cp kernel/config.yaml.example kernel/config.yaml   # then edit
 
-# test runner + headless-browser dashboard verification
+# test runner
 pip install -r requirements-dev.txt
-python -m playwright install chromium chromium-headless-shell
 python -m pytest tests/
 ```
 
-Without `nomic-embed-text` the kernel automatically uses a built-in hashing
-embedder, so a fresh clone works offline with zero setup — but similarity then
-reflects shared vocabulary rather than meaning. Whichever backend is active is
-logged at startup and reported by `GET /health`.
+Without `nomic-embed-text` the kernel automatically uses a built-in hashing embedder, so a fresh clone works offline with zero setup — but similarity then reflects shared vocabulary rather than meaning. Whichever backend is active is logged at startup and reported by `GET /health` (dashboard **HealthBadge** shows Ollama vs hashing).
 
-Dependencies are split deliberately: `requirements.txt` is what the kernel needs
-to **run**, `requirements-dev.txt` is what you need to **verify** it (pytest,
-playwright). Nothing in the dev file is imported by `kernel/`, `api/`, `agents/`
-or `shell/`.
+Dependencies are split deliberately: `requirements.txt` is what the kernel needs to **run**, `requirements-dev.txt` is what you need to **verify** it (pytest). Nothing in the dev file is imported by `kernel/`, `api/`, `agents/`, or `shell/`.
 
 ### Configuration
 
-`kernel/config.yaml` is gitignored because it holds real API keys; the tracked
-`kernel/config.yaml.example` is the template and is what Docker mounts by
-default. Structure:
+`kernel/config.yaml` is gitignored because it holds real API keys; the tracked `kernel/config.yaml.example` is the template and is what Docker mounts by default.
 
-```yaml
-groq:
-  api_key: "..."
-  model: "llama-3.1-8b-instant"
+One environment variable overrides Ollama host in config: **`AIOS_OLLAMA_HOST`** (Compose sets `http://ollama:11434`).
 
-gemini:
-  api_key: "..."
-  model: "gemini-1.5-flash"
+Startup embedding policy: **`AIOS_STARTUP_EMBEDDINGS=hashing`** (default) switches to the offline hashing embedder before optional doc indexing so boot never blocks on Ollama.
 
-deepseek:
-  api_key: "..."
-  model: "deepseek-chat"
+## Shell (primary CLI demo)
 
-ollama:
-  host: "http://localhost:11434"
-  model: "llama3"
-
-embeddings:
-  backend: "ollama"
-  model: "nomic-embed-text"
+```bash
+uvicorn api.main:app --port 8000
+python shell/repl.py                              # acts as KERNEL-privileged root
+python shell/repl.py --agent alice                # act as a USER-level agent
+python shell/repl.py --url http://localhost:8010  # custom API port
 ```
 
-One environment variable overrides the file: **`AIOS_OLLAMA_HOST`** takes
-precedence over `ollama.host`, because a config written for a host install says
-`localhost`, which inside a container points at the container itself. Compose
-sets it to `http://ollama:11434`.
+Commands include `ps`, `top`, `pstree`, `spawn`, `wait`, `kill`, `limits`, `mem`, `ls`, `cat`, `find`, `strace`, `deadlock`, `mode`, `run`, and **`pipeline <task>`** (research → code → test → report). See [`shell/README.md`](shell/README.md).
+
+Remember: `--agent root` is a **declared identity**, not proof of privilege — see [Security & Identity Model](#security--identity-model).
 
 ## Dashboard
 
-A Next.js (App Router + TypeScript + Tailwind) dashboard in [`dashboard/`](dashboard/)
-gives a live, terminal-styled view of the kernel: a process table with
-color-coded state badges, a recharts Gantt chart of the last schedule run, a
-memory panel showing pages in RAM vs. swapped to ChromaDB, and a live syscall
-trace. All panels poll the backend every 2 seconds.
+Next.js dashboard in [`dashboard/`](dashboard/) — live panels (poll every ~2s unless noted):
 
-See the [Quickstart](#quickstart) above for how to start it (Docker brings it
-up automatically). The backend allows CORS from any localhost port and seeds
-demo scheduler/memory state on startup, so the panels are populated on first
-load. See [`dashboard/README.md`](dashboard/README.md) for details.
+- **Time Travel** — scrub kernel snapshots from `/replay/timeline`
+- **Process table** + **Gantt chart** (from seeded demo + `/scheduler/state`)
+- **Process tree** — live hierarchy from `/scheduler/tree`
+- **Memory view** — RAM vs ChromaDB swap, COW accounting
+- **Syscall trace** — last 20 syscalls
+- **Deadlock** — wait-for graph, avoidance toggle, force detect/recover
+- **Pipeline** — run and watch the flagship multi-agent workflow
+- **Kernel assistant** — chat against indexed project docs
+- **Health badge** — active embedding backend (Ollama vs hashing) from `/health`
+
+Provider **rate-limit pools** are visible in shell `top` (`GET /resources/state`), not yet as a dedicated dashboard panel.
+
+See [`dashboard/README.md`](dashboard/README.md) for component details.
 
 ## Evaluation
 
-The algorithms are measured, not just implemented. Everything is seeded, so
-results are reproducible and citable — see
-[`benchmarks/README.md`](benchmarks/README.md) for the full write-up, raw JSON
-and charts.
+The algorithms are measured, not just implemented. Everything is seeded, so results are reproducible and citable — see [`benchmarks/README.md`](benchmarks/README.md).
 
 ```bash
 python -m benchmarks.scheduler_bench    # FCFS / RR / Priority (+aging) / MLFQ (+boost)
@@ -199,74 +207,12 @@ python -m benchmarks.cow_bench          # copy-on-write savings vs naive fork
 
 ### Starvation, and what it costs to fix
 
-Priority scheduling's textbook flaw, demonstrated and then repaired:
-problem → measurement → solution → measurement.
-
-- **The flaw is real and averages hide it.** On a workload with a saturating
-  stream of priority-0 arrivals, plain Priority posts the **best average
-  waiting time of any algorithm (20.3)** while leaving the lowest-priority
-  processes with the **worst starvation gap (84)**. Reporting the mean alone
-  would have called it the winner.
-- **It is starvation, not just a long wait.** Lengthening the stream 8×
-  multiplies the worst low-priority wait by **4.7** under Priority (52 → 243)
-  but only **1.3×** under Priority+Aging (52 → 69). Unbounded vs. bounded.
-- **The fixes are added as variants**, `priority_aging` and `mlfq_boost`, so
-  the originals stay measurable next to them.
-- **The fix is not free, and the cost is explainable.** Bounding the wait costs
-  the high-priority stream **+42.3 average waiting time**, which is almost
-  exactly the victims' total burst — you cannot bound the low-priority wait
-  without moving that work earlier, and moving it earlier is what it costs.
-- **Aging is a dial, not a constant.** As its interval → 0 it degenerates to
-  FCFS; as it → ∞ it degenerates to plain Priority, and the sweep hits both
-  endpoints exactly. At an interval of 2.0 it is numerically identical to FCFS
-  on all four profiles — a "fix" that deletes the thing it fixes. The sweep,
-  not the chosen default, is the result.
-
-Full write-up, tables and charts:
-[`benchmarks/README.md` §4](benchmarks/README.md#4-starvation-under-priority-scheduling-and-the-cost-of-fixing-it).
+Priority scheduling's textbook flaw, demonstrated and then repaired: problem → measurement → solution → measurement. Full write-up: [`benchmarks/README.md` §4](benchmarks/README.md#4-starvation-under-priority-scheduling-and-the-cost-of-fixing-it).
 
 ### Belady's Anomaly
 
-Adding memory should never make a page-replacement policy *worse* — except that
-for some policies it can. This experiment sweeps RAM capacity as an independent
-variable and looks for steps where an extra frame *raises* the fault rate.
-
-- **The canonical reference string reproduces the textbook exactly**, run
-  through the real `PageManager`: **FIFO 9 → 10 faults** at 3 → 4 frames (the
-  anomaly), **LRU 10 → 8** (immune). Matching the published counts on the
-  published input validates the kernel's own replacement implementations.
-- **The broad sweep found zero anomalies** across 4 policies × 5 traces ×
-  capacities 2–10 × 10 seeds. **LRU** showing none is the expected self-check —
-  it is a stack algorithm, so an anomaly there would have meant a bug in our
-  code. **FIFO** is therefore confirmed *in principle but not triggered by our
-  workloads*.
-- **Semantic-LRU showed no anomaly — a negative result, not proof of immunity.**
-  It has no stack property, so nothing forbids one; this is absence of evidence
-  over one workload set.
-- Note the sweep runs on `PolicySim`, an in-memory replica of the policies
-  (ChromaDB write throughput makes the live path ~8s per cell), cross-validated
-  against the real kernel on the canonical string. The
-  [full write-up](benchmarks/README.md#3-beladys-anomaly-experiment) covers what
-  that does and does not license you to conclude.
-
-A methodology note worth repeating: a 5-seed run reported an anomaly that
-**vanished at 10 seeds**. The threshold for calling a step "systematic" was
-tightened from >50% to ≥75% of seeds as a result, and every reported anomaly
-now carries its seed count.
-
-## Roadmap
-
-Remaining phases from `PROJECT_PLAN.md`:
-
-- **Scheduler** — FCFS, Round Robin (token-based quantum), Priority, and MLFQ scheduling over agent "processes"; `/scheduler/gantt` endpoint
-- **Memory Manager** — context window as paged RAM, FIFO/LRU/Semantic-LRU replacement, ChromaDB as swap storage, page-fault handling via similarity search
-- **Syscall Dispatcher** — single choke point for all agent-kernel interaction (`LLM_CALL`, `MEM_READ/WRITE`, `TOOL_CALL`, `SPAWN_AGENT`, `IPC_SEND/RECV`), with full syscall logging
-- **IPC** — async message queue and shared blackboard for multi-agent collaboration
-- **Access Control** — kernel-level vs. user-level agent privileges enforced in the syscall dispatcher
-- **Resource Allocation / Deadlock Avoidance** — per-provider rate-limit pools with a simplified Banker's Algorithm
-- **Semantic File System** — natural-language commands translated into embedding search + file ops
-- **Dashboard** — live process table, Gantt chart, memory page view, syscall trace, provider health panel
+Capacity sweep validating FIFO/LRU/Semantic-LRU behavior, including the canonical FIFO anomaly at 3→4 frames. Full write-up: [`benchmarks/README.md` §3](benchmarks/README.md#3-beladys-anomaly-experiment).
 
 ## Tech stack
 
-Python, FastAPI, Groq / DeepSeek / Gemini / Ollama, ChromaDB, [agno](https://github.com/agno-agi/agno)
+Python, FastAPI, Groq / DeepSeek / Gemini / Ollama, ChromaDB, Next.js, [agno](https://github.com/agno-agi/agno) (agent framework identity for example agents).
