@@ -1,0 +1,197 @@
+{
+  "benchmark": "scheduler",
+  "parameters": {
+    "workload_source": "real",
+    "capture_mode": "concurrent",
+    "workload_captured_at": "2026-08-23T11:54:13.103501+00:00",
+    "seed": null,
+    "num_processes": 20,
+    "max_arrival_time": 142.833729,
+    "num_priority_levels": 1,
+    "round_robin_quantum": 4.0,
+    "mlfq_quantums": [
+      4.0,
+      8.0,
+      16.0
+    ],
+    "aging_interval": 20.0,
+    "mlfq_boost_interval": 20.0,
+    "burst_unit": "seconds (measured LLM_CALL/TOOL_CALL latency_ms / 1000)",
+    "syscall_count": 328,
+    "contention": {
+      "jobs": 20,
+      "arrivals_while_another_in_flight": 19,
+      "max_concurrent_intervals": 5,
+      "ready_queue_forms": true
+    },
+    "algorithms_differ": true,
+    "note": "Single captured session. No seed, no constructed profiles, no starvation/tradeoff sweeps \u2014 those require a controlled synthetic stream that this log does not contain."
+  },
+  "profiles": {
+    "real_captured_concurrent": {
+      "description": "concurrent captured LLM_CALL/TOOL_CALL jobs (pipelines + assistant overlapping)",
+      "workload": {
+        "num_processes": 20,
+        "total_burst": 499.4172919999999,
+        "mean_burst": 24.971,
+        "max_burst": 57.215629,
+        "min_burst": 0.076283,
+        "priority_mix": {
+          "1": 20
+        }
+      },
+      "algorithms": {
+        "fcfs": {
+          "avg_waiting_time": 179.912,
+          "max_waiting_time": 351.206,
+          "low_priority_max_wait": 351.206,
+          "max_starvation_gap": 351.206,
+          "low_priority_max_gap": 351.206,
+          "avg_turnaround_time": 204.883,
+          "avg_response_time": 179.912,
+          "throughput": 0.04,
+          "context_switches": 19,
+          "makespan": 499.417,
+          "waiting_by_priority": {
+            "1": 179.912
+          },
+          "max_waiting_by_priority": {
+            "1": 351.206
+          },
+          "max_gap_by_priority": {
+            "1": 351.206
+          },
+          "worst_waiter": {
+            "pid": "assistant#04",
+            "priority": 1
+          }
+        },
+        "round_robin": {
+          "avg_waiting_time": 242.393,
+          "max_waiting_time": 369.077,
+          "low_priority_max_wait": 369.077,
+          "max_starvation_gap": 60.0,
+          "low_priority_max_gap": 60.0,
+          "avg_turnaround_time": 267.363,
+          "avg_response_time": 33.57,
+          "throughput": 0.04,
+          "context_switches": 138,
+          "makespan": 499.417,
+          "waiting_by_priority": {
+            "1": 242.393
+          },
+          "max_waiting_by_priority": {
+            "1": 369.077
+          },
+          "max_gap_by_priority": {
+            "1": 60.0
+          },
+          "worst_waiter": {
+            "pid": "pipeline_1cb68123_writer#01",
+            "priority": 1
+          }
+        },
+        "priority": {
+          "avg_waiting_time": 179.912,
+          "max_waiting_time": 351.206,
+          "low_priority_max_wait": 351.206,
+          "max_starvation_gap": 351.206,
+          "low_priority_max_gap": 351.206,
+          "avg_turnaround_time": 204.883,
+          "avg_response_time": 179.912,
+          "throughput": 0.04,
+          "context_switches": 19,
+          "makespan": 499.417,
+          "waiting_by_priority": {
+            "1": 179.912
+          },
+          "max_waiting_by_priority": {
+            "1": 351.206
+          },
+          "max_gap_by_priority": {
+            "1": 351.206
+          },
+          "worst_waiter": {
+            "pid": "assistant#04",
+            "priority": 1
+          }
+        },
+        "priority_aging": {
+          "avg_waiting_time": 179.912,
+          "max_waiting_time": 351.206,
+          "low_priority_max_wait": 351.206,
+          "max_starvation_gap": 351.206,
+          "low_priority_max_gap": 351.206,
+          "avg_turnaround_time": 204.883,
+          "avg_response_time": 179.912,
+          "throughput": 0.04,
+          "context_switches": 19,
+          "makespan": 499.417,
+          "waiting_by_priority": {
+            "1": 179.912
+          },
+          "max_waiting_by_priority": {
+            "1": 351.206
+          },
+          "max_gap_by_priority": {
+            "1": 351.206
+          },
+          "worst_waiter": {
+            "pid": "assistant#04",
+            "priority": 1
+          }
+        },
+        "mlfq": {
+          "avg_waiting_time": 202.56,
+          "max_waiting_time": 356.635,
+          "low_priority_max_wait": 356.635,
+          "max_starvation_gap": 257.966,
+          "low_priority_max_gap": 257.966,
+          "avg_turnaround_time": 227.531,
+          "avg_response_time": 5.247,
+          "throughput": 0.04,
+          "context_switches": 52,
+          "makespan": 499.417,
+          "waiting_by_priority": {
+            "1": 202.56
+          },
+          "max_waiting_by_priority": {
+            "1": 356.635
+          },
+          "max_gap_by_priority": {
+            "1": 257.966
+          },
+          "worst_waiter": {
+            "pid": "assistant#04",
+            "priority": 1
+          }
+        },
+        "mlfq_boost": {
+          "avg_waiting_time": 242.95,
+          "max_waiting_time": 373.494,
+          "low_priority_max_wait": 373.494,
+          "max_starvation_gap": 61.229,
+          "low_priority_max_gap": 61.229,
+          "avg_turnaround_time": 267.921,
+          "avg_response_time": 29.709,
+          "throughput": 0.04,
+          "context_switches": 133,
+          "makespan": 499.417,
+          "waiting_by_priority": {
+            "1": 242.95
+          },
+          "max_waiting_by_priority": {
+            "1": 373.494
+          },
+          "max_gap_by_priority": {
+            "1": 61.229
+          },
+          "worst_waiter": {
+            "pid": "assistant#01",
+            "priority": 1
+          }
+        }
+      }
+    }
+  }
+}

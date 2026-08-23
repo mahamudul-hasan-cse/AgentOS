@@ -112,6 +112,10 @@ class SyscallDispatcher:
             SyscallType.WAIT: self._handle_wait,
             SyscallType.DEADLOCK_DETECT: self._handle_deadlock_detect,
             SyscallType.DEADLOCK_RECOVER: self._handle_deadlock_recover,
+            SyscallType.PROC_LIST: self._handle_proc_list,
+            SyscallType.MEM_STATE: self._handle_mem_state,
+            SyscallType.RESOURCE_STATE: self._handle_resource_state,
+            SyscallType.SYSCALL_LOG: self._handle_syscall_log,
         }
         self._spawn_counter = 0
         # Deadlock detection/recovery, the complement to the Banker's Algorithm
@@ -304,8 +308,13 @@ class SyscallDispatcher:
                 f"agent '{owner}' has reached its memory page quota "
                 f"({usage['pages_used']}/{usage['max_pages']} pages)"
             )
-        page, evicted = self.page_manager.write_page(
-            owner, page_id, content, token_count=token_count, policy=policy
+        page, evicted = await asyncio.to_thread(
+            self.page_manager.write_page,
+            owner,
+            page_id,
+            content,
+            token_count=token_count,
+            policy=policy,
         )
         self.quota_manager.record_page(owner, page_id)
         return {
@@ -327,7 +336,12 @@ class SyscallDispatcher:
         **_,
     ) -> Dict[str, Any]:
         owner = target_agent_id or agent_id
-        result = self.page_manager.read(owner, query_text, policy=policy)
+        result = await asyncio.to_thread(
+            self.page_manager.read,
+            owner,
+            query_text,
+            policy=policy,
+        )
         return {
             "page": {
                 "page_id": result.page.page_id,
@@ -338,7 +352,6 @@ class SyscallDispatcher:
             "page_fault": result.page_fault,
             "evicted_page_id": result.evicted_page_id,
         }
-
 
     async def _handle_tool_call(
         self,
@@ -361,7 +374,9 @@ class SyscallDispatcher:
 
         from kernel.sandbox import run_python_sandbox
 
-        result = run_python_sandbox(code, timeout_seconds=timeout_seconds)
+        result = await asyncio.to_thread(
+            run_python_sandbox, code, timeout_seconds=timeout_seconds
+        )
         return {"tool": tool, "agent_id": agent_id, **result}
 
     async def _handle_ipc_send(
@@ -396,15 +411,22 @@ class SyscallDispatcher:
         target_agent_id: Optional[str] = None,
         **_,
     ) -> Dict[str, Any]:
-        return self.filesystem.write_file(
-            agent_id, filename, content, target_agent_id=target_agent_id
+        return await asyncio.to_thread(
+            self.filesystem.write_file,
+            agent_id,
+            filename,
+            content,
+            target_agent_id=target_agent_id,
         )
 
     async def _handle_file_read(
         self, agent_id: str, filename: str, target_agent_id: Optional[str] = None, **_
     ) -> Dict[str, Any]:
-        content = self.filesystem.read_file(
-            agent_id, filename, target_agent_id=target_agent_id
+        content = await asyncio.to_thread(
+            self.filesystem.read_file,
+            agent_id,
+            filename,
+            target_agent_id=target_agent_id,
         )
         return {"filename": filename, "content": content}
 
@@ -416,10 +438,82 @@ class SyscallDispatcher:
         target_agent_id: Optional[str] = None,
         **_,
     ) -> Dict[str, Any]:
-        results = self.filesystem.search_files(
-            agent_id, query, top_k=top_k, target_agent_id=target_agent_id
+        results = await asyncio.to_thread(
+            self.filesystem.search_files,
+            agent_id,
+            query,
+            top_k=top_k,
+            target_agent_id=target_agent_id,
         )
         return {"query": query, "results": results}
+
+    # --- read-only introspection ------------------------------------------
+    # These exist so an agent running *inside* the kernel can observe the system
+    # through the same trap everything else goes through. An agent could not be
+    # said to be "part of the OS" if it had to reach around the dispatcher to
+    # find out what the OS was doing — and routing it through dispatch() means
+    # every observation is itself logged, so a user can watch the agent look.
+
+    async def _handle_proc_list(self, agent_id: str, **_) -> Dict[str, Any]:
+        """The process table and hierarchy. World-readable, like `ps`."""
+        self.scheduler.ensure_init()
+        return {
+            "processes": [
+                {
+                    "pid": p.pid,
+                    "state": p.state,
+                    "parent_pid": p.parent_pid,
+                    "priority": p.priority,
+                    "arrival_time": p.arrival_time,
+                    "estimated_burst": p.estimated_burst,
+                    "remaining_burst": p.remaining_burst,
+                    "exit_status": p.exit_status,
+                }
+                for p in self.scheduler.queue
+            ],
+            "tree": self.scheduler.get_tree(),
+            "count": len(self.scheduler.queue),
+        }
+
+    async def _handle_mem_state(
+        self, agent_id: str, target_agent_id: Optional[str] = None, **_
+    ) -> Dict[str, Any]:
+        """An agent's paged-memory state (RAM vs swap). Private: access control
+        already rejected a USER agent asking about anyone but itself."""
+        owner = target_agent_id or agent_id
+        state = self.page_manager.state(owner)
+        state["quota"] = self.quota_manager.usage(owner)
+        return state
+
+    async def _handle_resource_state(self, agent_id: str, **_) -> Dict[str, Any]:
+        """Provider rate-limit pools plus the current deadlock picture.
+
+        Deliberately distinct from DEADLOCK_DETECT, which is KERNEL-only: this
+        reports the detector's last known status without running recovery.
+        Observing is not the same privilege as acting.
+        """
+        return {
+            "providers": self.resource_manager.state(),
+            "deadlock": self.deadlock_detector.status(),
+        }
+
+    async def _handle_syscall_log(
+        self,
+        agent_id: str,
+        limit: int = 20,
+        target_agent_id: Optional[str] = None,
+        **_,
+    ) -> Dict[str, Any]:
+        """Recent syscalls for one agent, most recent first. Private per agent,
+        like an strace of another process — USER callers were already restricted
+        to their own trace by access control.
+
+        Note the caller's own in-flight SYSCALL_LOG is not in the log yet: it is
+        appended by dispatch()'s finally block after this handler returns.
+        """
+        owner = target_agent_id or agent_id
+        entries = [s.as_dict() for s in self.get_log() if s.agent_id == owner]
+        return {"agent_id": owner, "syscalls": entries[:limit], "total": len(entries)}
 
     async def _cancel_inflight(self, pid: str) -> bool:
         task = self._inflight_tasks.get(pid)

@@ -55,6 +55,17 @@ USER_ALLOWED_SYSCALLS = frozenset(
         # wait(): reaping is inherently scoped to the caller's own children, so
         # no extra check is needed here.
         SyscallType.WAIT,
+        # Read-only introspection. The Unix analogy sets the scope:
+        #   PROC_LIST / RESOURCE_STATE are world-readable, like `ps` and
+        #     /proc/meminfo -- knowing what is running and how loaded the
+        #     providers are leaks nothing an agent could not infer anyway.
+        #   MEM_STATE / SYSCALL_LOG are per-agent private, like another
+        #     process's address space or an strace of it: readable for
+        #     yourself, KERNEL-only for anyone else (enforced below).
+        SyscallType.PROC_LIST,
+        SyscallType.RESOURCE_STATE,
+        SyscallType.MEM_STATE,
+        SyscallType.SYSCALL_LOG,
     }
 )
 
@@ -101,11 +112,23 @@ class AccessControl:
                 f"{syscall_type.value} (requires KERNEL privilege)"
             )
 
-        if syscall_type in (SyscallType.MEM_READ, SyscallType.MEM_WRITE):
+        if syscall_type in (
+            SyscallType.MEM_READ,
+            SyscallType.MEM_WRITE,
+            SyscallType.MEM_STATE,
+        ):
             if target_agent_id is not None and target_agent_id != agent_id:
                 raise AccessDenied(
                     f"USER-level agent '{agent_id}' may not access the memory of "
                     f"'{target_agent_id}' (requires KERNEL privilege)"
+                )
+
+        if syscall_type == SyscallType.SYSCALL_LOG:
+            # an agent may trace itself, but not another agent
+            if target_agent_id is not None and target_agent_id != agent_id:
+                raise AccessDenied(
+                    f"USER-level agent '{agent_id}' may not read the syscall trace "
+                    f"of '{target_agent_id}' (requires KERNEL privilege)"
                 )
 
         if syscall_type == SyscallType.TERMINATE_AGENT:

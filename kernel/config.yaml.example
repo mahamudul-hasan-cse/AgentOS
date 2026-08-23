@@ -1,6 +1,6 @@
 groq:
   api_key: "your-groq-api-key-here"
-  model: "llama-3.1-8b-instant"
+  model: "openai/gpt-oss-20b"
 
 gemini:
   api_key: "your-gemini-api-key-here"

@@ -1,5 +1,15 @@
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+  process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8012";
+
+export interface HealthStatus {
+  status: string;
+  embedding_backend: string;
+  semantic_embeddings: boolean;
+  startup?: {
+    status?: string;
+    steps?: Record<string, { status?: string; [key: string]: unknown }>;
+  };
+}
 
 export interface ProcessRow {
   pid: string;
@@ -65,6 +75,8 @@ async function getJSON<T>(path: string): Promise<T> {
 export const fetchSchedulerState = () =>
   getJSON<SchedulerState>("/scheduler/state");
 
+export const fetchHealth = () => getJSON<HealthStatus>("/health");
+
 export const fetchMemoryState = (agentId: string) =>
   getJSON<MemoryState>(`/memory/state/${encodeURIComponent(agentId)}`);
 
@@ -91,6 +103,55 @@ export function colorForPid(pid: string): string {
     hash = (hash * 31 + pid.charCodeAt(i)) & 0xffffffff;
   }
   return PALETTE[Math.abs(hash) % PALETTE.length];
+}
+
+// --- kernel assistant --------------------------------------------------------
+
+export interface AssistantSyscall {
+  syscall_id: string;
+  type: string;
+  target: string | null;
+  status: string;
+  latency_ms: number | null;
+  error: string | null;
+}
+
+export interface AssistantChatReply {
+  answer: string;
+  syscalls: AssistantSyscall[];
+  process_alive: boolean;
+  process_state: string | null;
+}
+
+export interface AssistantStatus {
+  pid: string;
+  alive: boolean;
+  state: string | null;
+  parent_pid: string | null;
+  privilege: string | null;
+  indexed_documents: number;
+}
+
+export const fetchAssistantStatus = () =>
+  getJSON<AssistantStatus>("/assistant/status");
+
+export async function askAssistant(
+  message: string,
+  history: { role: string; content: string }[]
+): Promise<AssistantChatReply> {
+  const res = await fetch(`${API_BASE}/assistant/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message, history }),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function restartAssistant(): Promise<AssistantStatus> {
+  const res = await fetch(`${API_BASE}/assistant/restart`, { method: "POST" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 // --- flagship pipeline -------------------------------------------------------

@@ -1,6 +1,6 @@
 import asyncio
 
-from agents.pipeline import PipelineRunner
+from agents.pipeline import PipelineRunner, StageRecord
 from kernel.access_control import AccessControl, QuotaManager
 from kernel.drivers.base import DriverConnectionError, LLMDriver
 from kernel.filesystem import SemanticFS
@@ -146,6 +146,58 @@ def test_groq_driver_fallback_mid_pipeline_does_not_break_run(tmp_path):
     llm_stages = [stage for stage in result["stages"] if stage["stage"] in {"researcher", "coder", "writer"}]
     assert all(stage["driver_used"] == "ollama" for stage in llm_stages)
     assert result["tester"]["passed"] is True
+
+
+def test_stage_exception_becomes_visible_failure_not_permanent_running(tmp_path):
+    async def scenario():
+        disp = make_dispatcher(tmp_path)
+        runner = PipelineRunner(disp)
+        record = StageRecord(stage="coder", agent_id="coder")
+        disp.scheduler.spawn("coder", parent_pid="init")
+        updates = []
+
+        async def broken_stage():
+            raise ValueError("generated code could not be parsed")
+
+        try:
+            await runner._run_stage(
+                "coder", {"coder": record}, lambda _: updates.append(record.as_dict()), broken_stage()
+            )
+        except Exception as exc:  # noqa: BLE001 - verifying wrapping behavior
+            error = exc
+        return record, updates, error
+
+    record, updates, error = run(scenario())
+    assert record.status == "failed"
+    assert "ValueError: generated code could not be parsed" == record.error
+    assert "generated code could not be parsed" in str(error)
+    assert updates[-1]["status"] == "failed"
+
+
+def test_stage_timeout_becomes_visible_failure_not_permanent_running(tmp_path):
+    async def scenario():
+        disp = make_dispatcher(tmp_path)
+        runner = PipelineRunner(disp, stage_timeout_seconds=0.05)
+        record = StageRecord(stage="coder", agent_id="coder")
+        disp.scheduler.spawn("coder", parent_pid="init")
+        updates = []
+
+        try:
+            await runner._run_stage(
+                "coder",
+                {"coder": record},
+                lambda _: updates.append(record.as_dict()),
+                asyncio.sleep(10),
+            )
+        except Exception as exc:  # noqa: BLE001 - verifying wrapping behavior
+            error = exc
+        return record, updates, error
+
+    record, updates, error = run(scenario())
+    assert record.status == "failed"
+    assert record.error == "timeout after 0.1s"
+    assert "timeout after 0.1s" in str(error)
+    assert updates[-1]["status"] == "failed"
 
 
 def test_python_sandbox_blocks_dangerous_imports_and_calls():

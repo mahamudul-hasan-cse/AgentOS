@@ -1,0 +1,189 @@
+{
+  "benchmark": "scheduler",
+  "parameters": {
+    "workload_source": "real",
+    "workload_captured_at": "2026-08-23T11:24:34.301949+00:00",
+    "seed": null,
+    "num_processes": 20,
+    "max_arrival_time": 164.193599,
+    "num_priority_levels": 1,
+    "round_robin_quantum": 4.0,
+    "mlfq_quantums": [
+      4.0,
+      8.0,
+      16.0
+    ],
+    "aging_interval": 20.0,
+    "mlfq_boost_interval": 20.0,
+    "burst_unit": "seconds (measured LLM_CALL/TOOL_CALL latency_ms / 1000)",
+    "syscall_count": 313,
+    "note": "Single captured session. No seed, no constructed profiles, no starvation/tradeoff sweeps \u2014 those require a controlled synthetic stream that this log does not contain."
+  },
+  "profiles": {
+    "real_captured": {
+      "description": "captured LLM_CALL/TOOL_CALL jobs from a live pipeline + assistant session",
+      "workload": {
+        "num_processes": 20,
+        "total_burst": 168.565589,
+        "mean_burst": 8.428,
+        "max_burst": 17.774429,
+        "min_burst": 0.08165,
+        "priority_mix": {
+          "1": 20
+        }
+      },
+      "algorithms": {
+        "fcfs": {
+          "avg_waiting_time": 0.0,
+          "max_waiting_time": 0.0,
+          "low_priority_max_wait": 0.0,
+          "max_starvation_gap": 0.0,
+          "low_priority_max_gap": 0.0,
+          "avg_turnaround_time": 8.428,
+          "avg_response_time": 0.0,
+          "throughput": 0.1178,
+          "context_switches": 19,
+          "makespan": 169.711,
+          "waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_gap_by_priority": {
+            "1": 0.0
+          },
+          "worst_waiter": {
+            "pid": "pipeline_25e4fd80_coder#02",
+            "priority": 1
+          }
+        },
+        "round_robin": {
+          "avg_waiting_time": 0.0,
+          "max_waiting_time": 0.0,
+          "low_priority_max_wait": 0.0,
+          "max_starvation_gap": 0.0,
+          "low_priority_max_gap": 0.0,
+          "avg_turnaround_time": 8.428,
+          "avg_response_time": 0.0,
+          "throughput": 0.1178,
+          "context_switches": 19,
+          "makespan": 169.711,
+          "waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_gap_by_priority": {
+            "1": 0.0
+          },
+          "worst_waiter": {
+            "pid": "pipeline_25e4fd80_coder#02",
+            "priority": 1
+          }
+        },
+        "priority": {
+          "avg_waiting_time": 0.0,
+          "max_waiting_time": 0.0,
+          "low_priority_max_wait": 0.0,
+          "max_starvation_gap": 0.0,
+          "low_priority_max_gap": 0.0,
+          "avg_turnaround_time": 8.428,
+          "avg_response_time": 0.0,
+          "throughput": 0.1178,
+          "context_switches": 19,
+          "makespan": 169.711,
+          "waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_gap_by_priority": {
+            "1": 0.0
+          },
+          "worst_waiter": {
+            "pid": "pipeline_25e4fd80_coder#02",
+            "priority": 1
+          }
+        },
+        "priority_aging": {
+          "avg_waiting_time": 0.0,
+          "max_waiting_time": 0.0,
+          "low_priority_max_wait": 0.0,
+          "max_starvation_gap": 0.0,
+          "low_priority_max_gap": 0.0,
+          "avg_turnaround_time": 8.428,
+          "avg_response_time": 0.0,
+          "throughput": 0.1178,
+          "context_switches": 19,
+          "makespan": 169.711,
+          "waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_gap_by_priority": {
+            "1": 0.0
+          },
+          "worst_waiter": {
+            "pid": "pipeline_25e4fd80_coder#02",
+            "priority": 1
+          }
+        },
+        "mlfq": {
+          "avg_waiting_time": 0.0,
+          "max_waiting_time": 0.0,
+          "low_priority_max_wait": 0.0,
+          "max_starvation_gap": 0.0,
+          "low_priority_max_gap": 0.0,
+          "avg_turnaround_time": 8.428,
+          "avg_response_time": 0.0,
+          "throughput": 0.1178,
+          "context_switches": 19,
+          "makespan": 169.711,
+          "waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_gap_by_priority": {
+            "1": 0.0
+          },
+          "worst_waiter": {
+            "pid": "pipeline_25e4fd80_coder#02",
+            "priority": 1
+          }
+        },
+        "mlfq_boost": {
+          "avg_waiting_time": 0.0,
+          "max_waiting_time": 0.0,
+          "low_priority_max_wait": 0.0,
+          "max_starvation_gap": 0.0,
+          "low_priority_max_gap": 0.0,
+          "avg_turnaround_time": 8.428,
+          "avg_response_time": 0.0,
+          "throughput": 0.1178,
+          "context_switches": 19,
+          "makespan": 169.711,
+          "waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_waiting_by_priority": {
+            "1": 0.0
+          },
+          "max_gap_by_priority": {
+            "1": 0.0
+          },
+          "worst_waiter": {
+            "pid": "pipeline_25e4fd80_coder#02",
+            "priority": 1
+          }
+        }
+      }
+    }
+  }
+}

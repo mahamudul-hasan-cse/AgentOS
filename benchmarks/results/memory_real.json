@@ -1,0 +1,158 @@
+{
+  "benchmark": "memory",
+  "parameters": {
+    "workload_source": "real",
+    "workload_captured_at": "2026-08-23T11:24:34.301949+00:00",
+    "base_seed": null,
+    "num_seeds": 1,
+    "seeds": [
+      20260726
+    ],
+    "num_pages": 102,
+    "topics": [
+      "assistant",
+      "benchmarks",
+      "pipeline",
+      "plan",
+      "readme",
+      "shell"
+    ],
+    "pages_per_topic": null,
+    "tokens_per_page": "estimated (~4 chars/token) from captured content",
+    "ram_budget_tokens": 910,
+    "pages_resident_at_once": null,
+    "accesses_per_trace": 23,
+    "writes_in_trace": 199,
+    "loop_working_set": null,
+    "embedder": "CachingEmbedder (nomic-embed-text, 768-dim, real learned embeddings)",
+    "embeddings_are_semantic": true,
+    "seed_varies": "no \u2014 single captured sequence, not regenerated",
+    "syscall_count": 313,
+    "note": "Single captured session. No multi-seed average, no constructed traces (sequential/random/looping/clustered/paraphrased). Direction of a policy comparison is reported; robustness is not."
+  },
+  "traces": {
+    "real_captured": {
+      "description": "captured MEM_READ/MEM_WRITE/FILE_SEARCH (plus FILE_WRITE/FILE_READ) sequence from a live pipeline + assistant session, original order",
+      "queries": "real session queries / filenames",
+      "unique_pages_touched_mean": 16.0,
+      "policies": {
+        "fifo": {
+          "page_fault_rate": {
+            "mean": 0.9565,
+            "std": 0.0,
+            "min": 0.9565,
+            "max": 0.9565
+          },
+          "hit_ratio": {
+            "mean": 0.0435,
+            "std": 0.0,
+            "min": 0.0435,
+            "max": 0.0435
+          },
+          "per_seed_page_fault_rate": [
+            0.9565
+          ],
+          "avg_pages_in_ram_mean": 3.565,
+          "retrieval_accuracy_mean": 0.3913,
+          "topic_match_rate_mean": 0.5652,
+          "distinct_pages_retrieved_mean": 19,
+          "page_faults_mean": 22
+        },
+        "lru": {
+          "page_fault_rate": {
+            "mean": 0.9565,
+            "std": 0.0,
+            "min": 0.9565,
+            "max": 0.9565
+          },
+          "hit_ratio": {
+            "mean": 0.0435,
+            "std": 0.0,
+            "min": 0.0435,
+            "max": 0.0435
+          },
+          "per_seed_page_fault_rate": [
+            0.9565
+          ],
+          "avg_pages_in_ram_mean": 3.565,
+          "retrieval_accuracy_mean": 0.3913,
+          "topic_match_rate_mean": 0.5652,
+          "distinct_pages_retrieved_mean": 19,
+          "page_faults_mean": 22
+        },
+        "semantic_lru": {
+          "page_fault_rate": {
+            "mean": 0.9565,
+            "std": 0.0,
+            "min": 0.9565,
+            "max": 0.9565
+          },
+          "hit_ratio": {
+            "mean": 0.0435,
+            "std": 0.0,
+            "min": 0.0435,
+            "max": 0.0435
+          },
+          "per_seed_page_fault_rate": [
+            0.9565
+          ],
+          "avg_pages_in_ram_mean": 3.957,
+          "retrieval_accuracy_mean": 0.3913,
+          "topic_match_rate_mean": 0.5652,
+          "distinct_pages_retrieved_mean": 19,
+          "page_faults_mean": 22
+        },
+        "random": {
+          "page_fault_rate": {
+            "mean": 0.8696,
+            "std": 0.0,
+            "min": 0.8696,
+            "max": 0.8696
+          },
+          "hit_ratio": {
+            "mean": 0.1304,
+            "std": 0.0,
+            "min": 0.1304,
+            "max": 0.1304
+          },
+          "per_seed_page_fault_rate": [
+            0.8696
+          ],
+          "avg_pages_in_ram_mean": 3.435,
+          "retrieval_accuracy_mean": 0.3913,
+          "topic_match_rate_mean": 0.5652,
+          "distinct_pages_retrieved_mean": 19,
+          "page_faults_mean": 20
+        }
+      },
+      "semantic_vs_lru": {
+        "baseline": "lru",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": 0.0,
+        "std_of_paired_differences": 0.0,
+        "seeds_challenger_better": 0,
+        "seeds_challenger_worse": 0,
+        "seeds_tied": 1,
+        "margin_between_means": 0.0,
+        "baseline_std": 0.0,
+        "margin_exceeds_baseline_std": false,
+        "improvement_exceeds_paired_std": false
+      },
+      "semantic_vs_random": {
+        "baseline": "random",
+        "challenger": "semantic_lru",
+        "metric": "page_fault_rate",
+        "mean_improvement": -0.0869,
+        "std_of_paired_differences": 0.0,
+        "seeds_challenger_better": 0,
+        "seeds_challenger_worse": 1,
+        "seeds_tied": 0,
+        "margin_between_means": -0.0869,
+        "baseline_std": 0.0,
+        "margin_exceeds_baseline_std": true,
+        "improvement_exceeds_paired_std": true
+      }
+    }
+  }
+}

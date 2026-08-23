@@ -33,6 +33,15 @@ class SyscallType(str, Enum):
     SET_QUOTA = "SET_QUOTA"
     DEADLOCK_DETECT = "DEADLOCK_DETECT"
     DEADLOCK_RECOVER = "DEADLOCK_RECOVER"
+    # --- read-only introspection ------------------------------------
+    # A /proc-like family: these only READ kernel state, never mutate it,
+    # which is why USER agents may issue them. They exist so an in-kernel
+    # agent can observe the system the same way it does anything else --
+    # by trapping into the dispatcher, so the observation is itself logged.
+    PROC_LIST = "PROC_LIST"
+    MEM_STATE = "MEM_STATE"
+    RESOURCE_STATE = "RESOURCE_STATE"
+    SYSCALL_LOG = "SYSCALL_LOG"
 
 
 class SyscallStatus(str, Enum):

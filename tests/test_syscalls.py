@@ -1,9 +1,13 @@
 import asyncio
 import shutil
+import time
+from unittest.mock import MagicMock
 
 import pytest
+from groq import APITimeoutError
 
-from kernel.drivers.base import LLMDriver
+from kernel.drivers.base import DriverConnectionError, LLMDriver
+from kernel.drivers.groq_driver import GroqDriver
 from kernel.memory import PageManager
 from kernel.syscalls import SyscallDispatcher, SyscallStatus, SyscallType
 
@@ -18,6 +22,28 @@ class FakeDriver(LLMDriver):
 
     async def generate(self, prompt: str, **kwargs) -> str:
         return f"echo: {prompt}"
+
+
+class TimeoutDriver(LLMDriver):
+    """Simulates a cloud driver that hit its HTTP deadline."""
+
+    name = "groq"
+
+    def is_available(self) -> bool:
+        return True
+
+    async def generate(self, prompt: str, **kwargs) -> str:
+        raise DriverConnectionError("Request timed out")
+
+
+class FallbackDriver(LLMDriver):
+    name = "ollama"
+
+    def is_available(self) -> bool:
+        return True
+
+    async def generate(self, prompt: str, **kwargs) -> str:
+        return f"fallback: {prompt}"
 
 
 def run(coro):
@@ -107,3 +133,57 @@ def test_get_log_returns_most_recent_first_with_limit(dispatcher):
     assert len(recent) == 2
     assert recent[0].args["prompt"] == "three"
     assert recent[1].args["prompt"] == "two"
+
+
+def test_groq_driver_timeout_maps_to_connection_error():
+    driver = GroqDriver()
+    driver._client = MagicMock()
+    driver._client.chat.completions.create.side_effect = APITimeoutError("request timed out")
+
+    with pytest.raises(DriverConnectionError):
+        run(driver.generate("hello", timeout=1))
+
+
+def test_llm_call_falls_back_to_ollama_when_primary_times_out(tmp_path):
+    async def scenario():
+        pm = PageManager(chroma_path=str(tmp_path / "chroma_db"))
+        disp = SyscallDispatcher(
+            page_manager=pm,
+            driver_registry={"groq": TimeoutDriver, "ollama": FallbackDriver},
+        )
+        return await disp.dispatch(
+            "agent-timeout", SyscallType.LLM_CALL, prompt="still here?", driver="groq"
+        )
+
+    syscall = run(scenario())
+    assert syscall.status == SyscallStatus.SUCCESS
+    assert syscall.result == {"driver_used": "ollama", "text": "fallback: still here?"}
+
+
+def test_hung_sandbox_does_not_stall_concurrent_syscalls(dispatcher):
+    async def scenario():
+        sandbox_task = asyncio.create_task(
+            dispatcher.dispatch(
+                "agent-sandbox",
+                SyscallType.TOOL_CALL,
+                tool="python_sandbox",
+                code="while True:\n    pass\n",
+                timeout_seconds=0.3,
+            )
+        )
+        await asyncio.sleep(0.05)
+        llm_started = time.perf_counter()
+        llm = await dispatcher.dispatch(
+            "agent-live", SyscallType.LLM_CALL, prompt="concurrent", driver="fake"
+        )
+        llm_elapsed = time.perf_counter() - llm_started
+        sandbox = await sandbox_task
+        return llm, llm_elapsed, sandbox
+
+    llm, llm_elapsed, sandbox = run(scenario())
+
+    assert llm.status == SyscallStatus.SUCCESS
+    assert llm_elapsed < 0.25, "LLM_CALL should not wait for the sandbox thread to finish"
+    assert sandbox.status == SyscallStatus.SUCCESS
+    assert sandbox.result["timeout"] is True
+    assert sandbox.result["timeout_kill"]["pid"]

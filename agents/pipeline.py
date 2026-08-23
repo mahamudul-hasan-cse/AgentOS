@@ -7,6 +7,7 @@ the syscall dispatcher so the trace is inspectable end-to-end.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from .example_agents import KernelAgent
 
 PIPELINE_AGENT_PREFIX = "pipeline"
 ASSISTANT_PID = "assistant"
+DEFAULT_STAGE_TIMEOUT_SECONDS = 90.0
 DEFAULT_STAGE_QUOTAS = {
     "coordinator": {"max_pages": 6, "max_calls_per_minute": 2},
     "researcher": {"max_pages": 4, "max_calls_per_minute": 2},
@@ -232,9 +234,11 @@ class PipelineRunner:
         self,
         dispatcher: SyscallDispatcher,
         on_update: Optional[Callable[[Dict[str, Any]], None]] = None,
+        stage_timeout_seconds: float = DEFAULT_STAGE_TIMEOUT_SECONDS,
     ) -> None:
         self.dispatcher = dispatcher
         self.on_update = on_update
+        self.stage_timeout_seconds = stage_timeout_seconds
 
     async def run(
         self,
@@ -270,7 +274,9 @@ class PipelineRunner:
                 self.on_update(dict(status))
 
         publish()
-        await self._spawn_processes(coordinator_id, stage_ids, quotas or DEFAULT_STAGE_QUOTAS, status)
+        await self._spawn_processes(
+            coordinator_id, stage_ids, quotas or DEFAULT_STAGE_QUOTAS, status
+        )
         await self._coordinator_probe(coordinator_id, "start")
 
         agents = {
@@ -313,7 +319,12 @@ class PipelineRunner:
                     stages["writer"].status = "failed"
                     stages["writer"].error = str(writer_exc)
         finally:
-            await self._coordinator_probe(coordinator_id, "finish")
+            try:
+                await self._coordinator_probe(coordinator_id, "finish")
+            except PipelineStageError as exc:
+                status["events"].append(
+                    {"stage": "coordinator", "status": "failed", "message": str(exc)}
+                )
             self._set_process_state(coordinator_id, "terminated")
             publish(None)
 
@@ -390,13 +401,21 @@ class PipelineRunner:
         self._set_process_state(record.agent_id, "running")
         publish(stage)
         try:
-            result = await work
+            result = await asyncio.wait_for(work, timeout=self.stage_timeout_seconds)
             record.status = "success"
             return result
+        except asyncio.TimeoutError as exc:
+            record.status = "failed"
+            record.error = f"timeout after {self.stage_timeout_seconds:.1f}s"
+            raise PipelineStageError(stage, record.error) from exc
         except PipelineStageError as exc:
             record.status = "failed"
             record.error = str(exc)
             raise
+        except Exception as exc:
+            record.status = "failed"
+            record.error = f"{type(exc).__name__}: {exc}"
+            raise PipelineStageError(stage, record.error) from exc
         finally:
             process = self.dispatcher.scheduler.get(record.agent_id)
             if process is not None and process.state != "zombie":

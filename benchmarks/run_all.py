@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import matplotlib
 
@@ -109,10 +109,17 @@ def write_scheduler_charts(results: Dict) -> List[Path]:
     profiles = list(results["profiles"])
     algorithms = scheduler_bench.ALGORITHMS
     p = results["parameters"]
-    subtitle = (
-        f"seed={p['seed']} · n={p['num_processes']} processes · "
-        f"RR quantum={p['round_robin_quantum']} · MLFQ={p['mlfq_quantums']}"
-    )
+    source = p.get("workload_source", "synthetic")
+    if source == "real":
+        subtitle = (
+            f"source=real · n={p['num_processes']} captured jobs · "
+            f"RR quantum={p['round_robin_quantum']} · MLFQ={p['mlfq_quantums']}"
+        )
+    else:
+        subtitle = (
+            f"seed={p['seed']} · n={p['num_processes']} processes · "
+            f"RR quantum={p['round_robin_quantum']} · MLFQ={p['mlfq_quantums']}"
+        )
 
     written = []
     for metric, title, ylabel in SCHEDULER_CHARTS:
@@ -120,7 +127,8 @@ def write_scheduler_charts(results: Dict) -> List[Path]:
             algo: [results["profiles"][prof]["algorithms"][algo][metric] for prof in profiles]
             for algo in algorithms
         }
-        path = RESULTS_DIR / f"scheduler_{metric}.png"
+        suffix = "_real" if source == "real" else ""
+        path = RESULTS_DIR / f"scheduler_{metric}{suffix}.png"
         _grouped_bar_chart(path, f"Scheduler — {title}", subtitle, ylabel, profiles, series)
         written.append(path)
     # the starvation-specific charts own their layout (x = priority level, and
@@ -133,12 +141,20 @@ def write_memory_charts(results: Dict) -> List[Path]:
     traces = list(results["traces"])
     policies = memory_bench.POLICIES
     p = results["parameters"]
-    subtitle = (
-        f"base_seed={p['base_seed']} · {p['num_seeds']} seeds (error bars = ±1 sd) · "
-        f"{p['num_pages']} pages · ~{p['pages_resident_at_once']} resident · "
-        f"{p['accesses_per_trace']} accesses · "
-        f"{'semantic' if p['embeddings_are_semantic'] else 'HASHING (not a fair test)'} embeddings"
-    )
+    source = p.get("workload_source", "synthetic")
+    if source == "real":
+        subtitle = (
+            f"source=real · single captured sequence · "
+            f"{p['num_pages']} pages · {p['accesses_per_trace']} reads · "
+            f"{'semantic' if p['embeddings_are_semantic'] else 'HASHING (not a fair test)'} embeddings"
+        )
+    else:
+        subtitle = (
+            f"base_seed={p['base_seed']} · {p['num_seeds']} seeds (error bars = ±1 sd) · "
+            f"{p['num_pages']} pages · ~{p['pages_resident_at_once']} resident · "
+            f"{p['accesses_per_trace']} accesses · "
+            f"{'semantic' if p['embeddings_are_semantic'] else 'HASHING (not a fair test)'} embeddings"
+        )
 
     written = []
     for metric, title, ylabel in MEMORY_CHARTS:
@@ -150,7 +166,8 @@ def write_memory_charts(results: Dict) -> List[Path]:
             pol: [results["traces"][t]["policies"][pol][metric]["std"] for t in traces]
             for pol in policies
         }
-        path = RESULTS_DIR / f"memory_{metric}.png"
+        suffix = "_real" if source == "real" else ""
+        path = RESULTS_DIR / f"memory_{metric}{suffix}.png"
         _grouped_bar_chart(
             path, f"Page replacement — {title}", subtitle, ylabel, traces, series, errors
         )
@@ -161,37 +178,47 @@ def write_memory_charts(results: Dict) -> List[Path]:
             pol: [results["traces"][t]["policies"][pol][metric] for t in traces]
             for pol in policies
         }
-        path = RESULTS_DIR / f"memory_{metric.removesuffix('_mean')}.png"
+        suffix = "_real" if source == "real" else ""
+        path = RESULTS_DIR / f"memory_{metric.removesuffix('_mean')}{suffix}.png"
         _grouped_bar_chart(path, f"Page replacement — {title}", subtitle, ylabel, traces, series)
         written.append(path)
     return written
 
 
-def main(num_seeds: int = memory_bench.DEFAULT_NUM_SEEDS) -> int:
+def main(
+    num_seeds: int = memory_bench.DEFAULT_NUM_SEEDS,
+    workload_source: str = "synthetic",
+    workload_path: Optional[str] = None,
+) -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    scheduler_results = scheduler_bench.run_benchmark()
+    scheduler_results = scheduler_bench.run_benchmark(
+        workload_source=workload_source, workload_path=workload_path
+    )
     print(scheduler_bench.format_tables(scheduler_results))
     print()
 
-    memory_results = memory_bench.run_benchmark(num_seeds=num_seeds)
+    memory_results = memory_bench.run_benchmark(
+        num_seeds=num_seeds,
+        workload_source=workload_source,
+        workload_path=workload_path,
+    )
     print(memory_bench.format_tables(memory_results))
     print()
 
-    (RESULTS_DIR / "scheduler.json").write_text(
-        json.dumps(scheduler_results, indent=2), encoding="utf-8"
-    )
-    (RESULTS_DIR / "memory.json").write_text(
-        json.dumps(memory_results, indent=2), encoding="utf-8"
-    )
+    suffix = "_real" if workload_source == "real" else ""
+    sched_path = RESULTS_DIR / f"scheduler{suffix}.json"
+    mem_path = RESULTS_DIR / f"memory{suffix}.json"
+    sched_path.write_text(json.dumps(scheduler_results, indent=2), encoding="utf-8")
+    mem_path.write_text(json.dumps(memory_results, indent=2), encoding="utf-8")
 
     charts = write_scheduler_charts(scheduler_results) + write_memory_charts(memory_results)
 
     print("=" * 78)
     print("ARTIFACTS")
     print("=" * 78)
-    print(f"  {RESULTS_DIR / 'scheduler.json'}")
-    print(f"  {RESULTS_DIR / 'memory.json'}")
+    print(f"  {sched_path}")
+    print(f"  {mem_path}")
     for path in charts:
         print(f"  {path}")
     return 0
@@ -210,4 +237,22 @@ if __name__ == "__main__":
             f"(default {memory_bench.DEFAULT_NUM_SEEDS}; lower it for a quick run)"
         ),
     )
-    raise SystemExit(main(num_seeds=parser.parse_args().seeds))
+    parser.add_argument(
+        "--workload-source",
+        choices=("synthetic", "real"),
+        default="synthetic",
+        help="synthetic seeded workloads (default) or a captured real-data file",
+    )
+    parser.add_argument(
+        "--workload",
+        default=None,
+        help="path to exported real-data JSON (used when --workload-source real)",
+    )
+    args = parser.parse_args()
+    raise SystemExit(
+        main(
+            num_seeds=args.seeds,
+            workload_source=args.workload_source,
+            workload_path=args.workload,
+        )
+    )

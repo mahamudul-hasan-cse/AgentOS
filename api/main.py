@@ -1,14 +1,72 @@
+import asyncio
 import logging
+import os
+import time
 from contextlib import asynccontextmanager
+from copy import deepcopy
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from agents import PipelineRunner, run_collaboration
-from kernel.memory import get_embedder
+from agents.kernel_assistant import ASSISTANT_PID, KernelAssistant
+from kernel.memory import HashingEmbedder, get_embedder, set_embedder
 from kernel.scheduler import DEFAULT_MLFQ_QUANTUMS, Process, Scheduler, UnknownAlgorithmError
 from kernel.syscalls import Syscall, SyscallDispatcher, SyscallStatus, SyscallType
+
+STARTUP_MEMORY_DEMO_TIMEOUT = 10.0
+STARTUP_ASSISTANT_INDEX_TIMEOUT = 30.0
+STARTUP_DEADLOCK_MONITOR_TIMEOUT = 5.0
+STARTUP_EMBEDDINGS_ENV = "AIOS_STARTUP_EMBEDDINGS"
+STARTUP_EMBEDDINGS_HASHING = "hashing"
+STARTUP_EMBEDDINGS_ACTIVE = "active"
+
+
+def _apply_startup_embedding_policy_before_dispatcher() -> dict:
+    """Select the startup embedder before Chroma collections are opened."""
+    policy = os.environ.get(STARTUP_EMBEDDINGS_ENV, STARTUP_EMBEDDINGS_HASHING)
+    policy = policy.strip().lower()
+
+    if policy in {STARTUP_EMBEDDINGS_ACTIVE, "ollama", "semantic"}:
+        active = get_embedder()
+        return {
+            "status": "skipped",
+            "backend": active.describe(),
+            "policy": policy,
+            "reason": f"{STARTUP_EMBEDDINGS_ENV} keeps the active backend",
+        }
+
+    if policy != STARTUP_EMBEDDINGS_HASHING:
+        logging.getLogger("uvicorn.error").warning(
+            "startup: unknown %s=%r; using %s",
+            STARTUP_EMBEDDINGS_ENV,
+            policy,
+            STARTUP_EMBEDDINGS_HASHING,
+        )
+        policy = STARTUP_EMBEDDINGS_HASHING
+
+    active = get_embedder()
+    if not active.semantic:
+        return {
+            "status": "skipped",
+            "backend": active.describe(),
+            "policy": policy,
+            "reason": "active backend is already offline/non-semantic",
+        }
+
+    fallback = HashingEmbedder()
+    set_embedder(fallback)
+    return {
+        "status": "complete",
+        "from_backend": active.describe(),
+        "to_backend": fallback.describe(),
+        "policy": policy,
+        "reason": "optional startup indexing must not depend on Ollama responsiveness",
+    }
+
+
+_startup_embedding_policy_result = _apply_startup_embedding_policy_before_dispatcher()
 
 # Single choke point for all agent-kernel interaction. The dispatcher owns the
 # PageManager (memory subsystem) and routes to the driver layer for LLM calls.
@@ -29,7 +87,13 @@ pipeline_state: dict = {
     "tester": None,
     "events": [],
 }
-
+startup_state: dict = {
+    "status": "starting",
+    "started_at": None,
+    "ready_at": None,
+    "steps": {},
+}
+_startup_background_tasks: set[asyncio.Task] = set()
 
 def _process_to_dict(p: Process) -> dict:
     return {
@@ -95,6 +159,10 @@ async def _seed_memory_demo() -> None:
 # rejected by access control.
 ADMIN_AGENT_ID = "root"
 
+# The in-kernel chat assistant. Constructed here but only becomes a live
+# process once register() runs in the lifespan below.
+assistant = KernelAssistant(dispatcher)
+
 
 def _log_embedding_backend() -> None:
     """Announce which embedding backend is actually in use.
@@ -112,22 +180,184 @@ def _log_embedding_backend() -> None:
         log.warning("embeddings: could not determine active backend: %s", exc)
 
 
+def _startup_log() -> logging.Logger:
+    return logging.getLogger("uvicorn.error")
+
+
+def _mark_startup_step(name: str, state: str, **extra: object) -> None:
+    step = startup_state["steps"].setdefault(name, {})
+    step.update({"status": state, "updated_at": time.time(), **extra})
+
+
+async def _run_startup_step(name: str, awaitable, timeout: float):
+    """Run an optional startup step with a hard budget.
+
+    Startup steps must never make the API unreachable indefinitely. Failures and
+    timeouts are recorded in /health and logged as warnings; callers decide
+    whether the step should be awaited before serving or launched in background.
+    """
+    _mark_startup_step(name, "running", timeout_seconds=timeout)
+    started = time.perf_counter()
+    try:
+        result = await asyncio.wait_for(awaitable, timeout=timeout)
+    except asyncio.TimeoutError:
+        elapsed = round(time.perf_counter() - started, 2)
+        _mark_startup_step(name, "timeout", elapsed_seconds=elapsed)
+        _startup_log().warning(
+            "startup: %s timed out after %.1fs; continuing with degraded/incomplete state",
+            name,
+            timeout,
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001 - optional startup work must not block boot
+        elapsed = round(time.perf_counter() - started, 2)
+        _mark_startup_step(
+            name,
+            "error",
+            elapsed_seconds=elapsed,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        _startup_log().warning("startup: %s failed; continuing: %s", name, exc)
+        return None
+
+    elapsed = round(time.perf_counter() - started, 2)
+    if elapsed > timeout:
+        _mark_startup_step(name, "over_budget", elapsed_seconds=elapsed)
+        _startup_log().warning(
+            "startup: %s completed in %.2fs, exceeding its %.1fs budget",
+            name,
+            elapsed,
+            timeout,
+        )
+    else:
+        _mark_startup_step(name, "complete", elapsed_seconds=elapsed)
+    return result
+
+
+def _track_startup_task(task: asyncio.Task) -> None:
+    _startup_background_tasks.add(task)
+    task.add_done_callback(_startup_background_tasks.discard)
+
+
+def _configure_startup_embeddings() -> None:
+    """Report the embedding policy selected before dispatcher construction."""
+    result = dict(_startup_embedding_policy_result)
+    status = str(result.pop("status", "unknown"))
+    _mark_startup_step("embedding_backend_fallback", status, **result)
+    if status != "complete":
+        return
+
+    _mark_startup_step(
+        "embedding_backend_fallback",
+        "complete",
+        **result,
+    )
+    _startup_log().warning(
+        "startup: switched optional boot indexing from %s to %s: %s",
+        result.get("from_backend"),
+        result.get("to_backend"),
+        f"{STARTUP_EMBEDDINGS_ENV}={result.get('policy')}",
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from kernel.access_control import AgentPrivilege
 
+    memory_seed_task = None
+    assistant_index_task = None
+    startup_state["status"] = "starting"
+    startup_state["started_at"] = time.time()
+    startup_state["ready_at"] = None
+    startup_state["steps"] = {}
+
     _log_embedding_backend()
+    _configure_startup_embeddings()
     dispatcher.acl.registry.register(ADMIN_AGENT_ID, AgentPrivilege.KERNEL)
     _seed_scheduler_demo()
+    _mark_startup_step(
+        "memory_demo_seed",
+        "queued",
+        timeout_seconds=STARTUP_MEMORY_DEMO_TIMEOUT,
+    )
+
+    async def seed_memory_demo() -> None:
+        await _run_startup_step(
+            "memory_demo_seed", _seed_memory_demo(), STARTUP_MEMORY_DEMO_TIMEOUT
+        )
+
+    memory_seed_task = seed_memory_demo
+    # Register the assistant as a real process and index the repo docs it
+    # answers project questions from. Best-effort: a docs-indexing failure
+    # must not stop the kernel booting.
     try:
-        await _seed_memory_demo()
-    except Exception:  # seeding is best-effort; never block startup on it
-        pass
+        assistant.register()
+        _mark_startup_step("assistant_register", "complete")
+        _mark_startup_step(
+            "assistant_doc_index",
+            "queued",
+            timeout_seconds=STARTUP_ASSISTANT_INDEX_TIMEOUT,
+        )
+        log = logging.getLogger("uvicorn.error")
+        log.info("assistant: registered as process '%s' (USER)", ASSISTANT_PID)
+
+        async def index_assistant_docs() -> None:
+            indexed = await _run_startup_step(
+                "assistant_doc_index",
+                assistant.index_documentation(),
+                STARTUP_ASSISTANT_INDEX_TIMEOUT,
+            )
+            if indexed is not None:
+                try:
+                    indexed_total = len(dispatcher.filesystem.list_files(ASSISTANT_PID))
+                except Exception:  # noqa: BLE001 - health metadata is best-effort
+                    indexed_total = indexed.get("indexed", 0)
+                _mark_startup_step(
+                    "assistant_doc_index",
+                    "complete",
+                    indexed_documents=indexed_total,
+                    indexed_this_run=indexed.get("indexed", 0),
+                    missing=indexed.get("missing", []),
+                )
+                _startup_log().info(
+                    "assistant: indexed %d doc chunks this run (%d total)",
+                    indexed.get("indexed", 0),
+                    indexed_total,
+                )
+            else:
+                current = startup_state["steps"].get("assistant_doc_index", {})
+                if current.get("status") not in ("timeout", "error"):
+                    _mark_startup_step("assistant_doc_index", "partial")
+
+        assistant_index_task = index_assistant_docs
+    except Exception as exc:  # noqa: BLE001
+        _mark_startup_step(
+            "assistant_register",
+            "error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        logging.getLogger("uvicorn.error").warning(
+            "assistant: startup registration/indexing failed: %s", exc
+        )
     # start the deadlock monitor iff avoidance is off (see _sync_deadlock_monitor)
-    await _sync_deadlock_monitor()
+    await _run_startup_step(
+        "deadlock_monitor_sync",
+        _sync_deadlock_monitor(),
+        STARTUP_DEADLOCK_MONITOR_TIMEOUT,
+    )
+    startup_state["status"] = "serving"
+    startup_state["ready_at"] = time.time()
+    if memory_seed_task is not None:
+        _track_startup_task(asyncio.create_task(memory_seed_task()))
+    if assistant_index_task is not None:
+        _track_startup_task(asyncio.create_task(assistant_index_task()))
     try:
         yield
     finally:
+        for task in list(_startup_background_tasks):
+            task.cancel()
+        if _startup_background_tasks:
+            await asyncio.gather(*_startup_background_tasks, return_exceptions=True)
         # always cancel the background task, even if startup raised
         await dispatcher.deadlock_detector.stop()
 
@@ -194,6 +424,7 @@ def health() -> dict:
         "status": "ok",
         "embedding_backend": embedder.describe(),
         "semantic_embeddings": embedder.semantic,
+        "startup": deepcopy(startup_state),
     }
 
 
@@ -785,3 +1016,85 @@ def fs_list(agent_id: str) -> FsListResponse:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return FsListResponse(agent_id=agent_id, files=files)
+
+
+# --- kernel assistant --------------------------------------------------------
+# The assistant is an in-kernel agent, not a service this API wraps. These
+# endpoints are a thin transport over its syscalls: the process lives in
+# dispatcher.scheduler, and everything it reads goes through dispatcher.dispatch.
+
+class AssistantChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []
+    driver: str = "groq"
+
+
+class AssistantSyscall(BaseModel):
+    syscall_id: str
+    type: str
+    target: str | None = None
+    status: str
+    latency_ms: float | None = None
+    error: str | None = None
+
+
+class AssistantChatResponse(BaseModel):
+    answer: str
+    syscalls: list[AssistantSyscall]
+    process_alive: bool
+    process_state: str | None = None
+
+
+class AssistantStatusResponse(BaseModel):
+    pid: str
+    alive: bool
+    state: str | None = None
+    parent_pid: str | None = None
+    privilege: str | None = None
+    indexed_documents: int
+
+
+@app.get("/assistant/status", response_model=AssistantStatusResponse)
+def assistant_status() -> AssistantStatusResponse:
+    """Whether process 'assistant' is alive. The chat panel polls this so it can
+    degrade gracefully the moment the process is killed from the shell."""
+    process = dispatcher.scheduler.get(ASSISTANT_PID)
+    try:
+        indexed = len(dispatcher.filesystem.list_files(ASSISTANT_PID))
+    except Exception:  # noqa: BLE001 — status must never fail on a listing error
+        indexed = 0
+    return AssistantStatusResponse(
+        pid=ASSISTANT_PID,
+        alive=assistant.is_alive(),
+        state=process.state if process is not None else None,
+        parent_pid=process.parent_pid if process is not None else None,
+        privilege=dispatcher.acl.registry.privilege(ASSISTANT_PID).value,
+        indexed_documents=indexed,
+    )
+
+
+@app.post("/assistant/chat", response_model=AssistantChatResponse)
+async def assistant_chat(request: AssistantChatRequest) -> AssistantChatResponse:
+    """Ask the in-kernel assistant a question.
+
+    Returns the answer together with every syscall it issued to produce it, so
+    the caller can verify the grounding rather than take the answer on trust.
+    Deliberately not streamed: the syscall list is the point, and it is only
+    complete once the turn is.
+
+    A dead assistant process is NOT an HTTP error — it is a normal, reportable
+    state that the panel renders, so killing it from the shell degrades the UI
+    instead of breaking it.
+    """
+    return AssistantChatResponse(
+        **await assistant.answer(
+            request.message, history=request.history, driver=request.driver
+        )
+    )
+
+
+@app.post("/assistant/restart", response_model=AssistantStatusResponse)
+def assistant_restart() -> AssistantStatusResponse:
+    """Re-register the assistant process after it has been killed."""
+    assistant.register()
+    return assistant_status()

@@ -1,46 +1,75 @@
 # Benchmarks
 
-An empirical evaluation of the algorithms implemented in this kernel, producing
-the comparative metrics an OS textbook uses. Everything is seeded, so results
-are reproducible and citable — re-running produces byte-identical JSON.
+An empirical evaluation of the algorithms implemented in this kernel.
+
+**Two kinds of evidence, kept separate on purpose:**
+
+| | Synthetic, seeded (§1–§5) | Real captured execution (§6) |
+|---|---|---|
+| How it is produced | `random.seed()` generators; constructed profiles/traces | live pipeline + kernel-assistant session, exported from the syscall log |
+| What it is for | statistical rigor (seeds, sweeps, Belady, aging curve) | checking whether those qualitative findings show up in practice |
+| Flag | `--workload-source synthetic` (the default) | `--workload-source real` |
+| Artifacts | `scheduler.json`, `memory.json`, `belady.json` | `workloads/real_captured.json` (sequential), `workloads/real_captured_concurrent.json` (overlapping), `scheduler_real.json`, `scheduler_real_concurrent.json`, `memory_real.json` |
+
+Re-running a synthetic suite produces byte-identical JSON. The real-data path has **no seed**: it is one captured session, smaller and less controlled (no guaranteed profile diversity, no overlapping arrivals unless the live system actually overlapped). Quote the seeded tables for claims that need a sweep; quote §6 only as validation, and say so.
 
 ## Running
 
 From the project root, with the venv active:
 
 ```bash
-python -m benchmarks.run_all             # both suites + JSON + PNG charts
+python -m benchmarks.run_all             # synthetic suites + JSON + PNG charts
 python -m benchmarks.run_all --seeds 3    # quicker run, fewer seeds
 python -m benchmarks.scheduler_bench      # scheduler + starvation study (fast)
 python -m benchmarks.memory_bench --seeds 10   # page-replacement only
 python -m benchmarks.belady_bench         # capacity sweep, Belady's Anomaly
 python -m benchmarks.cow_bench            # copy-on-write savings vs naive fork
+
+# real captured execution (after a live capture, or using the committed workload)
+python -m benchmarks.real_data_export --capture
+python -m benchmarks.real_data_export --capture --concurrent
+python -m benchmarks.scheduler_bench --workload-source real
+python -m benchmarks.scheduler_bench --workload-source real --workload benchmarks/workloads/real_captured_concurrent.json
+python -m benchmarks.memory_bench --workload-source real
+python -m benchmarks.run_all --workload-source real
 ```
 
-**Runtime.** The memory benchmark repeats every trace × policy across
+`--capture` runs three pipeline tasks and five assistant questions through a
+live `SyscallDispatcher`. Default is **sequential** (`real_captured.json`).
+`--concurrent` launches the three pipelines with `asyncio.gather` and starts
+assistant questions one second later so syscalls overlap
+(`real_captured_concurrent.json`). Groq's configured `llama-3.1-8b-instant`
+was retired (HTTP 404); the committed captures used local Ollama `qwen2.5:3b`
+so the LLM_CALL bursts are measured provider time, not a stub.
+
+**Runtime.** The synthetic memory benchmark repeats every trace × policy across
 `--seeds` seeds (default 10), which is 200 full trace replays (4 policies) and takes roughly
 **45–55 minutes** against a local Ollama. Use `--seeds 2` or `--seeds 3` for a
-fast sanity run; the scheduler benchmark is near-instant.
+fast sanity run; the synthetic scheduler benchmark is near-instant. The real
+memory replay is one sequence × 4 policies (minutes, not an hour).
 
 Artifacts land in `benchmarks/results/`:
 
-- `scheduler.json`, `memory.json` — raw measurements. Each file embeds the
+- `scheduler.json`, `memory.json` — **synthetic** measurements. Each file embeds the
   parameters that produced it, so a result is self-describing.
-- `scheduler_*.png`, `memory_*.png` — grouped bar charts, one per metric,
-  ready to drop into a report.
-- `scheduler_starvation_*.png` — the three starvation charts (§4). Written by
-  `scheduler_bench` itself, since they need their own layout rather than the
-  generic one-chart-per-metric treatment.
+- `scheduler_real.json`, `memory_real.json` — **captured-session** measurements.
+- `scheduler_*.png`, `memory_*.png` — grouped bar charts for the synthetic runs.
+- `*_real.png` — the same charts for the captured session.
+- `scheduler_starvation_*.png` — the three starvation charts (§4). Synthetic only:
+  the captured log has no constructed high-priority stream to sweep.
 
 For the memory suite, start Ollama and `ollama pull nomic-embed-text` first.
 Without it the run falls back to hashing embeddings and prints a warning —
 Semantic-LRU under hashing is **not** a fair test of it.
 
-## 1. Scheduler benchmark
+## 1. Scheduler benchmark (synthetic, seeded)
 
 24 processes with seeded arrival times, bursts and priorities, run through all
 six algorithms over the **identical** workload. (The algorithms mutate the
 process objects they schedule, so each run is handed freshly built copies.)
+
+This is the `--workload-source synthetic` path. The captured-session counterpart
+is §6 and is **not** a substitute for these profiles.
 
 Four workload profiles:
 
@@ -82,12 +111,15 @@ Four workload profiles:
   why the max and per-priority-level breakdowns exist; §4 is built entirely
   around the gap between the two.
 
-## 2. Memory / page-replacement benchmark
+## 2. Memory / page-replacement benchmark (synthetic, seeded)
 
 A universe of 20 pages (4 topics × 5 topically-related sentences), exercised by
 five access patterns. RAM holds ~5 pages. Each policy gets a fresh `PageManager`
 with its own ChromaDB directory, primed by writing every page, after which only
 the trace's reads are measured.
+
+Seeded traces and the 10-seed paired comparison live here. The captured-session
+replay is §6; it does not regenerate these traces.
 
 ### Multi-seed methodology
 
@@ -195,7 +227,7 @@ policy untouched. It was deliberately **not** added to
 `kernel/memory/replacement.py`: it is a control, not something anyone should run
 in production.
 
-## Findings (10 seeds, 4 policies — as measured, not tuned)
+## Findings (synthetic, 10 seeds, 4 policies — as measured, not tuned)
 
 Page fault rate, mean ± sd across 10 seeds (lower is better; **bold** = best):
 
@@ -266,14 +298,16 @@ would need more seeds to settle.
 
 
 
-Scheduler findings match the textbook: MLFQ gives the best response time
+Scheduler findings below are from the **synthetic seeded** profiles (seed
+20260726). They match the textbook: MLFQ gives the best response time
 everywhere and the best waiting/turnaround on both non-uniform profiles, while
 on `uniform` — where every job is the same size — preemption only adds overhead
-and plain FCFS wins on waiting and turnaround.
+and plain FCFS wins on waiting and turnaround. That profile-dependent inversion
+is a seeded result; §6 checks whether a live session can even *see* it.
 
 ---
 
-## 3. Belady's Anomaly experiment
+## 3. Belady's Anomaly experiment (synthetic, seeded)
 
 ```bash
 python -m benchmarks.belady_bench                      # 10 seeds, frames 2-10 (~2.5 min)
@@ -406,7 +440,7 @@ curves on `clustered` and `paraphrased` — correct, since neither consults the
 query and `paraphrased` reuses `clustered`'s access order — so the policies use
 distinct dash patterns to keep a coincident line visible underneath another.
 
-## 4. Starvation under priority scheduling, and the cost of fixing it
+## 4. Starvation under priority scheduling, and the cost of fixing it (synthetic, seeded)
 
 Problem, measurement, solution, measurement. Priority scheduling has a famous
 flaw: a low-priority process can be passed over indefinitely if higher-priority
@@ -604,7 +638,7 @@ variants remain work-conserving with no overlapping slices.
 - `scheduler_starvation_tradeoff.png` — starvation gap vs. high-priority cost,
   with FCFS/Priority/MLFQ marked as reference points.
 
-## 5. Copy-on-write benchmark
+## 5. Copy-on-write benchmark (synthetic, seeded)
 
 What does COW actually save over the obvious alternative? A parent builds 20
 pages (50 tokens each); *M* children fork from it; each child then issues 40
@@ -683,3 +717,163 @@ approximately zero, which is the true worst case for COW.
 This suite prints tables only — no JSON or charts. The savings surface is a
 smooth two-parameter grid with no anomaly to localise, so the table carries
 everything a chart would.
+
+## 6. Real captured execution (validation, not a seeded study)
+
+The benches above are deliberately *constructed*. This section is the opposite:
+a live run of the flagship pipeline and the in-kernel assistant, traced through
+the dispatcher, exported by `benchmarks/real_data_export.py`, and replayed with
+`--workload-source real`.
+
+Replay snapshots (`kernel/replay/recorder.py`) contribute **process priority
+only**. They store page identity, not page content, so they cannot feed the
+memory bench. Burst times come from measured `latency_ms` on `LLM_CALL` /
+`TOOL_CALL`, not from spawn-time `estimated_burst` (those are a-priori guesses
+of 2.0 / 4.0).
+
+**What a real burst actually is.** In this system, "burst time" for a real
+capture is dominated by **external LLM provider latency** — including
+provider-side queueing when multiple calls overlap, as seen in the concurrent
+capture where Ollama serializes generation — not by CPU-bound computation on
+the host. The scheduler is therefore ordering *when* syscalls are issued and
+how agents are interleaved while they wait on I/O-bound external calls. That
+is the accurate framing of what is being measured: it is analogous to an OS
+scheduler managing processes **blocked on I/O**, not CPU-bound processes
+competing for compute cycles.
+
+### 6a. Two captures, kept distinct
+
+There are now **two** real logs. They are not interchangeable.
+
+| | Sequential real capture | Concurrent real capture |
+|---|---|---|
+| File | `workloads/real_captured.json` | `workloads/real_captured_concurrent.json` |
+| How it was run | three pipeline tasks, then five assistant questions, one after another | three pipelines via `asyncio.gather`, assistant questions starting 1s later |
+| Scheduling decisions possible? | **No** | **Yes** |
+| Ready queue | at most one job runnable (a 0.0s floating-point touch on one coder pair is not contention) | 19/20 arrivals landed while another burst was still open; max 5 overlapping intervals |
+| What it is for | proves the live *default* pipeline does not stress the scheduler | asks whether algorithms still differ once real overlap exists |
+
+Replay snapshots contribute **process priority only**. Burst times come from
+measured `latency_ms` on `LLM_CALL` / `TOOL_CALL`, not spawn-time
+`estimated_burst`.
+
+Shared capture facts (both sessions, Ollama `qwen2.5:3b`):
+
+| | sequential | concurrent |
+|---|---|---|
+| Syscalls | 313 | 328 |
+| Scheduler jobs (all success) | 20 | 20 |
+| Burst range | 0.082–17.77s, mean 8.43s | 0.076–57.22s, mean 24.97s |
+| Priority mix | p1 × 20 | p1 × 20 |
+| Pipeline wall times | 38s + 48s + 35s (serial) | 106s / 119s / 129s (in parallel) |
+
+Concurrent bursts are **longer** than sequential ones because the three
+pipelines plus the assistant share one local Ollama. The dispatcher granted
+overlapping LLM_CALL slots (ollama pool raised to 8 for capture; default is 4),
+but the model itself queued work, so `latency_ms` includes provider wait.
+That is still a real measured syscall duration, and those stretched intervals
+are exactly what creates a ready queue in the replay.
+
+### 6b. Sequential real capture — no scheduling decisions possible
+
+On `real_captured.json` **every algorithm produced the identical timeline**:
+
+| algorithm | avg wait | avg turnaround | avg response | ctx switches | makespan |
+|---|---|---|---|---|---|
+| fcfs / RR / priority / aging / MLFQ / MLFQ+boost | **0** | 8.428 | **0** | 19 | 169.711 |
+
+The flagship pipeline is sequential inside a run, and this capture ran the
+three tasks and then the assistant **one after another**. Each syscall is
+issued after the previous one has finished, so at most one job is ready.
+Work-conserving policies have nothing to decide.
+
+This log is evidence about the system's *default* execution shape, not about
+which scheduler is better.
+
+### 6c. Concurrent real capture — scheduling decisions actually occur
+
+`--capture --concurrent` is the log that can test the schedulers.
+
+| | |
+|---|---|
+| Contention | `ready_queue_forms=True`; 19/20 arrivals while another job was in-flight; max concurrent intervals = 5 |
+| `algorithms_differ` | **True** |
+
+| algorithm | avg wait | max wait | avg turnaround | avg response | ctx switches | makespan |
+|---|---|---|---|---|---|---|
+| fcfs | **179.912** | **351.206** | **204.883** | 179.912 | **19** | 499.417 |
+| round_robin | 242.393 | 369.077 | 267.363 | 33.57 | 138 | 499.417 |
+| priority | 179.912 | 351.206 | 204.883 | 179.912 | 19 | 499.417 |
+| priority_aging | 179.912 | 351.206 | 204.883 | 179.912 | 19 | 499.417 |
+| mlfq | 202.56 | 356.635 | 227.531 | **5.247** | 52 | 499.417 |
+| mlfq_boost | 242.95 | 373.494 | 267.921 | 29.709 | 133 | 499.417 |
+
+Priority and Priority+Aging match FCFS: every captured job is priority 1, so
+the priority field carries no information. That is the live spawn policy
+(pipeline stages and the assistant all spawn at p1), not a scheduler bug.
+
+What *does* discriminate:
+
+- **MLFQ still has the best response time** (5.2 vs FCFS 180), the same
+  qualitative result as the seeded profiles.
+- **FCFS still has the best waiting/turnaround**, like seeded `uniform`, not
+  like seeded `mixed_short_long`. Real bursts here are mostly long LLM calls
+  (mean 25s, up to 57s) plus three tiny `TOOL_CALL`s (~0.08s). Against an RR
+  quantum of 4.0, preemption is a tax on the long jobs and does not pay for
+  itself in mean wait. The inversion vs MLFQ is therefore the *uniform-like*
+  side of the synthetic finding, which matches this capture's shape better
+  than the bimodal synthetic mix.
+- Round Robin and MLFQ+Boost buy response with many more context switches,
+  as in the seeded tables.
+
+(See the framing paragraph at the top of §6: these bursts are I/O waits on the
+LLM, not host CPU. Banker's algorithm allowed the overlapping calls — 8 ollama
+slots for capture; default is 4 — and Ollama itself was the bottleneck that
+stretched them.)
+
+### 6d. Memory — real vs synthetic
+
+Memory replay used the **sequential** capture (the concurrent log is the same
+kind of write-then-read session; the scheduler question is what concurrency
+changes). 23 reads after a write-heavy prefix. RAM budget 910 tokens. n=1,
+Ollama embeddings:
+
+| policy | fault rate | hit ratio | retr. acc | topic match |
+|---|---|---|---|---|
+| FIFO | 0.9565 | 0.0435 | 0.3913 | 0.5652 |
+| LRU | 0.9565 | 0.0435 | 0.3913 | 0.5652 |
+| Semantic-LRU | 0.9565 | 0.0435 | 0.3913 | 0.5652 |
+| Random | **0.8696** | **0.1304** | 0.3913 | 0.5652 |
+
+| synthetic claim (§2) | real captured | |
+|---|---|---|
+| Semantic-LRU does not beat LRU (no robust win at n=10) | identical 0.9565, tied | **consistent in direction**, but **n=1** — not a statistical confirmation |
+| embeddings help when the trace has semantic locality (`clustered`) | Random *better* than Semantic-LRU (−0.0869) | **does not reproduce** — this session is write-then-read over 102 pages, not clustered topic-dwelling |
+| Random beats Semantic-LRU on recency-pathological traces (`looping`) | Random 0.8696 vs 0.9565 | **suggestive of the same shape**, still n=1 |
+
+Almost every read faults under FIFO/LRU/Semantic-LRU (22/23). After ~102 writes
+into a ~5-page RAM, the pages later `FILE_SEARCH` / `MEM_READ` want are already
+in swap. `retr. acc` 0.39 / `topic match` 0.57 are identical across policies
+(query resolution, not replacement).
+
+### 6e. What we are willing to say
+
+1. **Sequential real capture:** no scheduling decisions possible. Do not cite
+   it as evidence that MLFQ "ties FCFS in practice".
+2. **Concurrent real capture:** a real ready queue forms, algorithms differ,
+   and MLFQ's response-time win plus FCFS's wait win on this long-burst mix
+   **agree with the synthetic `uniform` side of the inversion**. It does **not**
+   reproduce the mixed/heavy-tailed side (MLFQ best wait), because this
+   capture is not that mix. Still n=1, all priority 1, no starvation sweep.
+3. **Memory:** real data does not overturn "Semantic-LRU fails to beat LRU".
+4. **Do not fold these numbers into the seeded tables.** The rigor for Belady,
+   the aging curve, and the 10-seed paired tests remains synthetic.
+
+### Artifacts
+
+- `benchmarks/workloads/real_captured.json` — sequential session
+- `benchmarks/workloads/real_captured_concurrent.json` — overlapping session
+- `benchmarks/results/scheduler_real.json`, `scheduler_real_concurrent.json`,
+  `memory_real.json`
+- `benchmarks/results/*_real.png`
+

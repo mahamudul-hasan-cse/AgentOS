@@ -39,7 +39,8 @@ import random
 import shutil
 import statistics
 import tempfile
-from typing import Callable, Dict, List, Optional, Sequence
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from kernel.memory import PageManager
 from kernel.memory.embeddings import (
@@ -540,7 +541,229 @@ def compare_paired(
     }
 
 
-def run_benchmark(num_seeds: int = DEFAULT_NUM_SEEDS) -> Dict:
+def run_real_access_sequence(
+    policy: str,
+    pages: Sequence[dict],
+    accesses: Sequence[dict],
+    chroma_dir: Optional[str] = None,
+    seed: int = SEED,
+    ram_budget_tokens: int = RAM_BUDGET_TOKENS,
+) -> Dict[str, float]:
+    """Replay a captured write/read sequence. Faults are counted on reads only."""
+    owns_dir = chroma_dir is None
+    chroma_dir = chroma_dir or tempfile.mkdtemp(prefix="bench-real-")
+    by_id = {p["page_id"]: p for p in pages}
+    try:
+        manager = BenchPageManager(
+            ram_budget_tokens=ram_budget_tokens,
+            policy=policy,
+            chroma_path=chroma_dir,
+            rng=random.Random(f"{seed}-evict-{policy}"),
+        )
+        faults = 0
+        correct = 0
+        topic_hits = 0
+        retrieved_ids: set = set()
+        residency: List[int] = []
+        reads = 0
+        for access in accesses:
+            if access.get("op") == "write":
+                page_id = access["page_id"]
+                content = access.get("content") or by_id.get(page_id, {}).get("content")
+                if not page_id or content is None:
+                    continue
+                token_count = max(1, len(str(content)) // 4)
+                # a page larger than RAM cannot be admitted; skip rather than
+                # abort the whole replay — the capture already recorded it.
+                if token_count > ram_budget_tokens:
+                    continue
+                manager.write_page(
+                    AGENT, page_id, str(content), token_count=token_count
+                )
+                continue
+
+            query = access.get("query")
+            if not query:
+                continue
+            reads += 1
+            result = manager.read(AGENT, query)
+            if result.page_fault:
+                faults += 1
+            intended = access.get("page_id")
+            if intended and result.page.page_id == intended:
+                correct += 1
+            retrieved = by_id.get(result.page.page_id)
+            intended_page = by_id.get(intended) if intended else None
+            if (
+                retrieved is not None
+                and intended_page is not None
+                and retrieved.get("topic") == intended_page.get("topic")
+            ):
+                topic_hits += 1
+            retrieved_ids.add(result.page.page_id)
+            residency.append(len(manager.ram[AGENT]))
+
+        n = reads or 1
+        return {
+            "accesses": reads,
+            "page_faults": faults,
+            "page_fault_rate": round(faults / n, 4) if reads else 0.0,
+            "hit_ratio": round(1 - faults / n, 4) if reads else 0.0,
+            "avg_pages_in_ram": round(statistics.fmean(residency), 3) if residency else 0.0,
+            "retrieval_accuracy": round(correct / n, 4) if reads else 0.0,
+            "topic_match_rate": round(topic_hits / n, 4) if reads else 0.0,
+            "distinct_pages_retrieved": len(retrieved_ids),
+        }
+    finally:
+        if owns_dir:
+            release_chroma_dirs([chroma_dir])
+
+
+def _real_ram_budget(pages: Sequence[dict]) -> int:
+    """Keep ~5 median-sized pages resident, but never smaller than the largest page."""
+    if not pages:
+        return RAM_BUDGET_TOKENS
+    tokens = [max(1, len(str(p.get("content") or "")) // 4) for p in pages]
+    median = int(statistics.median(tokens))
+    return max(max(tokens), median * 5, RAM_BUDGET_TOKENS)
+
+
+def run_real_benchmark(workload_path: Optional[str] = None) -> Dict:
+    """Replay the captured memory sequence once per policy (no seeds)."""
+    from benchmarks.real_data_export import load_workload
+
+    workload = load_workload(Path(workload_path) if workload_path else None)
+    memory = workload.get("memory") or {}
+    pages = memory.get("pages") or []
+    accesses = memory.get("accesses") or []
+    if not pages or not any(a.get("op") == "read" for a in accesses):
+        raise ValueError("real workload has no memory pages/reads to replay")
+
+    embedder = select_embedder()
+    set_embedder(embedder)
+    print(f"real memory bench: embedder={embedder.describe()}  pages={len(pages)}  accesses={len(accesses)}", flush=True)
+    chroma_dirs: List[str] = []
+    ram_budget = _real_ram_budget(pages)
+    print(f"  ram_budget_tokens={ram_budget}", flush=True)
+    unique_touched = len({a.get("page_id") for a in accesses if a.get("op") == "read" and a.get("page_id")})
+    try:
+        per_policy: Dict[str, Dict[str, float]] = {}
+        for policy in POLICIES:
+            print(f"  running policy={policy}...", flush=True)
+            per_policy[policy] = run_trace_resilient_real(
+                policy, pages, accesses, chroma_dirs, ram_budget_tokens=ram_budget
+            )
+            print(f"    faults={per_policy[policy]['page_faults']} rate={per_policy[policy]['page_fault_rate']}", flush=True)
+
+        fault_rates = {
+            policy: [per_policy[policy]["page_fault_rate"]] for policy in POLICIES
+        }
+        trace_result: Dict = {
+            "description": (
+                "captured MEM_READ/MEM_WRITE/FILE_SEARCH (plus FILE_WRITE/FILE_READ) "
+                "sequence from a live pipeline + assistant session, original order"
+            ),
+            "queries": "real session queries / filenames",
+            "unique_pages_touched_mean": float(unique_touched),
+            "policies": {},
+            "semantic_vs_lru": compare_paired(fault_rates, baseline="lru", challenger="semantic_lru"),
+            "semantic_vs_random": compare_paired(
+                fault_rates, baseline=RANDOM_POLICY, challenger="semantic_lru"
+            ),
+        }
+        for policy in POLICIES:
+            run = per_policy[policy]
+            trace_result["policies"][policy] = {
+                "page_fault_rate": _mean_std([run["page_fault_rate"]]),
+                "hit_ratio": _mean_std([run["hit_ratio"]]),
+                "per_seed_page_fault_rate": [run["page_fault_rate"]],
+                "avg_pages_in_ram_mean": run["avg_pages_in_ram"],
+                "retrieval_accuracy_mean": run["retrieval_accuracy"],
+                "topic_match_rate_mean": run["topic_match_rate"],
+                "distinct_pages_retrieved_mean": run["distinct_pages_retrieved"],
+                "page_faults_mean": run["page_faults"],
+            }
+
+        provenance = workload.get("provenance") or {}
+        return {
+            "benchmark": "memory",
+            "parameters": {
+                "workload_source": "real",
+                "workload_captured_at": workload.get("captured_at"),
+                "base_seed": None,
+                "num_seeds": 1,
+                "seeds": [SEED],
+                "num_pages": len(pages),
+                "topics": sorted({p.get("topic") for p in pages if p.get("topic")}),
+                "pages_per_topic": None,
+                "tokens_per_page": "estimated (~4 chars/token) from captured content",
+                "ram_budget_tokens": ram_budget,
+                "pages_resident_at_once": None,
+                "accesses_per_trace": sum(1 for a in accesses if a.get("op") == "read"),
+                "writes_in_trace": sum(1 for a in accesses if a.get("op") == "write"),
+                "loop_working_set": None,
+                "embedder": embedder.describe(),
+                "embeddings_are_semantic": embedder.semantic,
+                "seed_varies": "no — single captured sequence, not regenerated",
+                "syscall_count": provenance.get("syscall_count"),
+                "note": (
+                    "Single captured session. No multi-seed average, no constructed "
+                    "traces (sequential/random/looping/clustered/paraphrased). "
+                    "Direction of a policy comparison is reported; robustness is not."
+                ),
+            },
+            "traces": {"real_captured": trace_result},
+        }
+    finally:
+        set_embedder(None)
+        release_chroma_dirs(chroma_dirs)
+
+
+def run_trace_resilient_real(
+    policy: str,
+    pages: Sequence[dict],
+    accesses: Sequence[dict],
+    chroma_dirs: List[str],
+    ram_budget_tokens: int,
+    attempts: int = 3,
+) -> Dict[str, float]:
+    last_error: Optional[Exception] = None
+    for attempt in range(attempts):
+        run_dir = tempfile.mkdtemp(prefix=f"bench-real-{policy}-")
+        chroma_dirs.append(run_dir)
+        try:
+            return run_real_access_sequence(
+                policy,
+                pages,
+                accesses,
+                chroma_dir=run_dir,
+                ram_budget_tokens=ram_budget_tokens,
+            )
+        except Exception as exc:  # noqa: BLE001 — retried below
+            last_error = exc
+            if attempt == attempts - 1:
+                raise
+            print(
+                f"    [retry {attempt + 1}/{attempts - 1}] {policy}: "
+                f"{type(exc).__name__} - retrying on a fresh store",
+                flush=True,
+            )
+            release_chroma_clients()
+        finally:
+            release_chroma_clients()
+    raise last_error  # unreachable
+
+
+def run_benchmark(
+    num_seeds: int = DEFAULT_NUM_SEEDS,
+    workload_source: str = "synthetic",
+    workload_path: Optional[str] = None,
+) -> Dict:
+    if workload_source == "real":
+        return run_real_benchmark(workload_path)
+    if workload_source != "synthetic":
+        raise ValueError(f"unknown workload_source '{workload_source}'")
+
     embedder = select_embedder()
     set_embedder(embedder)
     # every run gets its own directory; all are removed together at the end,
@@ -555,6 +778,7 @@ def run_benchmark(num_seeds: int = DEFAULT_NUM_SEEDS) -> Dict:
         results: Dict = {
             "benchmark": "memory",
             "parameters": {
+                "workload_source": "synthetic",
                 "base_seed": SEED,
                 "num_seeds": num_seeds,
                 "seeds": seeds,
@@ -664,6 +888,19 @@ def verdict_for(cmp: Dict, n_seeds: int) -> str:
         than its own spread? (sharper, since seeds are shared)
     A margin below the unpaired spread is NEVER reported as a plain "win".
     """
+    if n_seeds < 2:
+        margin = cmp["margin_between_means"]
+        if margin > 0:
+            return (
+                f"SINGLE RUN — Semantic-LRU lower fault rate "
+                f"(margin={margin:+.4f}); no seed spread, not a statistical claim"
+            )
+        if margin < 0:
+            return (
+                f"SINGLE RUN — Semantic-LRU higher fault rate "
+                f"(margin={margin:+.4f}); no seed spread, not a statistical claim"
+            )
+        return "SINGLE RUN — identical fault rate; no seed spread"
     margin = cmp["margin_between_means"]
     if margin < 0:
         return (
@@ -699,15 +936,25 @@ def verdict_for(cmp: Dict, n_seeds: int) -> str:
 def format_tables(results: Dict) -> str:
     lines: List[str] = []
     p = results["parameters"]
+    source = p.get("workload_source", "synthetic")
     lines.append("=" * 78)
-    lines.append("MEMORY / PAGE-REPLACEMENT BENCHMARK")
+    lines.append(f"MEMORY / PAGE-REPLACEMENT BENCHMARK  ({source})")
     lines.append("=" * 78)
-    lines.append(
-        f"base_seed={p['base_seed']}  seeds={p['num_seeds']}  "
-        f"pages={p['num_pages']} ({len(p['topics'])} topics x "
-        f"{p['pages_per_topic']})  ram={p['ram_budget_tokens']} tokens "
-        f"(~{p['pages_resident_at_once']} resident)  accesses={p['accesses_per_trace']}"
-    )
+    if source == "real":
+        lines.append(
+            f"source=real  pages={p['num_pages']}  "
+            f"topics={p['topics']}  ram={p['ram_budget_tokens']} tokens  "
+            f"reads={p['accesses_per_trace']}  writes={p.get('writes_in_trace')}"
+        )
+        if p.get("note"):
+            lines.append(f"note: {p['note']}")
+    else:
+        lines.append(
+            f"base_seed={p['base_seed']}  seeds={p['num_seeds']}  "
+            f"pages={p['num_pages']} ({len(p['topics'])} topics x "
+            f"{p['pages_per_topic']})  ram={p['ram_budget_tokens']} tokens "
+            f"(~{p['pages_resident_at_once']} resident)  accesses={p['accesses_per_trace']}"
+        )
     lines.append(f"per-seed variation: {p['seed_varies']}")
     lines.append(f"embedder: {p['embedder']}")
     if not p["embeddings_are_semantic"]:
@@ -819,14 +1066,23 @@ def format_tables(results: Dict) -> str:
     return "\n".join(lines)
 
 
-def main(num_seeds: int = DEFAULT_NUM_SEEDS) -> Dict:
-    results = run_benchmark(num_seeds=num_seeds)
+def main(
+    num_seeds: int = DEFAULT_NUM_SEEDS,
+    workload_source: str = "synthetic",
+    workload_path: Optional[str] = None,
+) -> Dict:
+    results = run_benchmark(
+        num_seeds=num_seeds,
+        workload_source=workload_source,
+        workload_path=workload_path,
+    )
     print(format_tables(results))
     return results
 
 
 if __name__ == "__main__":
     import argparse
+    import json
 
     parser = argparse.ArgumentParser(description="page-replacement benchmark")
     parser.add_argument(
@@ -835,4 +1091,28 @@ if __name__ == "__main__":
         default=DEFAULT_NUM_SEEDS,
         help=f"number of seeds to average over (default {DEFAULT_NUM_SEEDS})",
     )
-    main(num_seeds=parser.parse_args().seeds)
+    parser.add_argument(
+        "--workload-source",
+        choices=("synthetic", "real"),
+        default="synthetic",
+        help="synthetic seeded traces (default) or a captured real-data file",
+    )
+    parser.add_argument(
+        "--workload",
+        default=None,
+        help="path to exported real-data JSON (used when --workload-source real)",
+    )
+    args = parser.parse_args()
+    results = main(
+        num_seeds=args.seeds,
+        workload_source=args.workload_source,
+        workload_path=args.workload,
+    )
+    results_dir = Path(__file__).resolve().parent / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    out_name = "memory_real.json" if args.workload_source == "real" else "memory.json"
+    (results_dir / out_name).write_text(
+        json.dumps(results, indent=2), encoding="utf-8"
+    )
+    print("")
+    print(f"wrote {results_dir / out_name}")

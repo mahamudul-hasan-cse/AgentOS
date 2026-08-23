@@ -1,6 +1,7 @@
 {
   "benchmark": "scheduler",
   "parameters": {
+    "workload_source": "synthetic",
     "seed": 20260726,
     "num_processes": 24,
     "max_arrival_time": 40,

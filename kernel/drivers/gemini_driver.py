@@ -1,6 +1,7 @@
 import asyncio
 
 import google.generativeai as genai
+from google.generativeai.types.helper_types import RequestOptions
 from google.api_core.exceptions import (
     DeadlineExceeded,
     GoogleAPICallError,
@@ -27,9 +28,14 @@ class GeminiDriver(LLMDriver):
     async def generate(self, prompt: str, **kwargs) -> str:
         if not self.api_key:
             raise DriverConnectionError("Gemini API key not configured")
+        timeout = kwargs.get("timeout", 30)
         try:
             model = genai.GenerativeModel(kwargs.get("model", self.model))
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            response = await asyncio.to_thread(
+                model.generate_content,
+                prompt,
+                request_options=RequestOptions(timeout=timeout),
+            )
             return response.text
         except ResourceExhausted as e:
             raise RateLimitError(str(e)) from e

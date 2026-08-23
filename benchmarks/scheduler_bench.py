@@ -39,7 +39,8 @@ from __future__ import annotations
 import random
 import statistics
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
 
 from kernel.scheduler import (
     DEFAULT_AGING_INTERVAL,
@@ -393,11 +394,113 @@ def run_tradeoff_sweep() -> Dict[str, Any]:
     }
 
 
-def run_benchmark() -> Dict:
+def specs_from_real_workload(workload: Dict[str, Any]) -> List[ProcessSpec]:
+    """Build ProcessSpecs from a captured real-data workload file."""
+    processes = (workload.get("scheduler") or {}).get("processes") or []
+    if not processes:
+        raise ValueError("real workload has no scheduler processes")
+    specs: List[ProcessSpec] = []
+    for raw in processes:
+        specs.append(
+            ProcessSpec(
+                pid=str(raw["pid"]),
+                arrival_time=float(raw["arrival_time"]),
+                burst=float(raw["burst"]),
+                priority=int(raw.get("priority", 1)),
+            )
+        )
+    return specs
+
+
+def _profile_result(description: str, specs: Sequence[ProcessSpec]) -> Dict[str, Any]:
+    total_burst = sum(s.burst for s in specs)
+    priority_mix: Dict[str, int] = {}
+    for s in specs:
+        priority_mix[str(s.priority)] = priority_mix.get(str(s.priority), 0) + 1
+    profile_result = {
+        "description": description,
+        "workload": {
+            "num_processes": len(specs),
+            "total_burst": total_burst,
+            "mean_burst": round(statistics.fmean([s.burst for s in specs]), 3),
+            "max_burst": max(s.burst for s in specs),
+            "min_burst": min(s.burst for s in specs),
+            "priority_mix": dict(sorted(priority_mix.items())),
+        },
+        "algorithms": {},
+    }
+    for algorithm in ALGORITHMS:
+        timeline = run_algorithm(algorithm, specs)
+        profile_result["algorithms"][algorithm] = measure(specs, timeline)
+    return profile_result
+
+
+def run_real_benchmark(workload_path: Optional[str] = None) -> Dict:
+    """Replay captured LLM_CALL/TOOL_CALL jobs through every scheduler."""
+    from benchmarks.real_data_export import load_workload, overlap_stats
+
+    workload = load_workload(Path(workload_path) if workload_path else None)
+    specs = specs_from_real_workload(workload)
+    provenance = workload.get("provenance") or {}
+    contention = (workload.get("scheduler") or {}).get("contention") or overlap_stats(
+        [s.__dict__ for s in specs]
+    )
+    capture_mode = provenance.get("capture_mode", "sequential")
+    profile_name = (
+        "real_captured_concurrent" if capture_mode == "concurrent" else "real_captured"
+    )
+    description = (
+        "concurrent captured LLM_CALL/TOOL_CALL jobs (pipelines + assistant overlapping)"
+        if capture_mode == "concurrent"
+        else "captured LLM_CALL/TOOL_CALL jobs from a live pipeline + assistant session"
+    )
+    profile = _profile_result(description, specs)
+    waits = {
+        algo: profile["algorithms"][algo]["avg_waiting_time"] for algo in ALGORITHMS
+    }
+    unique_waits = {round(v, 6) for v in waits.values()}
+    return {
+        "benchmark": "scheduler",
+        "parameters": {
+            "workload_source": "real",
+            "capture_mode": capture_mode,
+            "workload_captured_at": workload.get("captured_at"),
+            "seed": None,
+            "num_processes": len(specs),
+            "max_arrival_time": max(s.arrival_time for s in specs),
+            "num_priority_levels": len({s.priority for s in specs}),
+            "round_robin_quantum": RR_QUANTUM,
+            "mlfq_quantums": list(DEFAULT_MLFQ_QUANTUMS),
+            "aging_interval": AGING_INTERVAL,
+            "mlfq_boost_interval": BOOST_INTERVAL,
+            "burst_unit": "seconds (measured LLM_CALL/TOOL_CALL latency_ms / 1000)",
+            "syscall_count": provenance.get("syscall_count"),
+            "contention": contention,
+            "algorithms_differ": len(unique_waits) > 1,
+            "note": (
+                "Single captured session. No seed, no constructed profiles, "
+                "no starvation/tradeoff sweeps — those require a controlled "
+                "synthetic stream that this log does not contain."
+            ),
+        },
+        "profiles": {profile_name: profile},
+    }
+
+
+def run_benchmark(
+    workload_source: str = "synthetic",
+    workload_path: Optional[str] = None,
+) -> Dict:
     """Run every algorithm over every profile. Returns a JSON-serializable dict."""
+    if workload_source == "real":
+        return run_real_benchmark(workload_path)
+    if workload_source != "synthetic":
+        raise ValueError(f"unknown workload_source '{workload_source}'")
+
     results: Dict = {
         "benchmark": "scheduler",
         "parameters": {
+            "workload_source": "synthetic",
             "seed": SEED,
             "num_processes": NUM_PROCESSES,
             "max_arrival_time": MAX_ARRIVAL,
@@ -411,27 +514,7 @@ def run_benchmark() -> Dict:
     }
 
     for profile, description in PROFILES.items():
-        specs = generate_workload(profile)
-        total_burst = sum(s.burst for s in specs)
-        priority_mix: Dict[str, int] = {}
-        for s in specs:
-            priority_mix[str(s.priority)] = priority_mix.get(str(s.priority), 0) + 1
-        profile_result = {
-            "description": description,
-            "workload": {
-                "num_processes": len(specs),
-                "total_burst": total_burst,
-                "mean_burst": round(statistics.fmean([s.burst for s in specs]), 3),
-                "max_burst": max(s.burst for s in specs),
-                "min_burst": min(s.burst for s in specs),
-                "priority_mix": dict(sorted(priority_mix.items())),
-            },
-            "algorithms": {},
-        }
-        for algorithm in ALGORITHMS:
-            timeline = run_algorithm(algorithm, specs)
-            profile_result["algorithms"][algorithm] = measure(specs, timeline)
-        results["profiles"][profile] = profile_result
+        results["profiles"][profile] = _profile_result(description, generate_workload(profile))
 
     results["starvation_sweep"] = run_starvation_sweep()
     results["tradeoff_sweep"] = run_tradeoff_sweep()
@@ -488,14 +571,35 @@ def format_tables(results: Dict) -> str:
     """Render results as aligned, self-describing text tables."""
     lines: List[str] = []
     params = results["parameters"]
+    source = params.get("workload_source", "synthetic")
     lines.append("=" * 78)
-    lines.append("SCHEDULER BENCHMARK")
+    lines.append(f"SCHEDULER BENCHMARK  ({source})")
     lines.append("=" * 78)
-    lines.append(
-        f"seed={params['seed']}  processes={params['num_processes']}  "
-        f"arrivals=0..{params['max_arrival_time']}  "
-        f"RR quantum={params['round_robin_quantum']}  MLFQ quantums={params['mlfq_quantums']}"
-    )
+    if source == "real":
+        lines.append(
+            f"source=real  processes={params['num_processes']}  "
+            f"arrivals=0..{params['max_arrival_time']:g}  "
+            f"RR quantum={params['round_robin_quantum']}  MLFQ quantums={params['mlfq_quantums']}"
+        )
+        if params.get("burst_unit"):
+            lines.append(f"burst unit: {params['burst_unit']}")
+        if params.get("note"):
+            lines.append(f"note: {params['note']}")
+        contention = params.get("contention") or {}
+        if contention:
+            lines.append(
+                f"contention: ready_queue_forms={contention.get('ready_queue_forms')}  "
+                f"arrivals_while_in_flight="
+                f"{contention.get('arrivals_while_another_in_flight')}  "
+                f"max_concurrent={contention.get('max_concurrent_intervals')}  "
+                f"algorithms_differ={params.get('algorithms_differ')}"
+            )
+    else:
+        lines.append(
+            f"seed={params['seed']}  processes={params['num_processes']}  "
+            f"arrivals=0..{params['max_arrival_time']}  "
+            f"RR quantum={params['round_robin_quantum']}  MLFQ quantums={params['mlfq_quantums']}"
+        )
     lines.append(
         f"aging interval={params['aging_interval']}  "
         f"MLFQ boost interval={params['mlfq_boost_interval']}"
@@ -572,8 +676,10 @@ def format_tables(results: Dict) -> str:
         for row in p_rows:
             lines.append("    " + pfmt(row))
 
-    # --- the unboundedness check -----------------------------------------
-    sweep = results["starvation_sweep"]
+    # --- the unboundedness check (synthetic only) -------------------------
+    sweep = results.get("starvation_sweep")
+    if not sweep:
+        return "\n".join(lines)
     lines.append("")
     lines.append("--- starvation sweep: does the wait GROW, or is it bounded? ---")
     lines.append(f"    {sweep['description']}")
@@ -607,7 +713,8 @@ def format_tables(results: Dict) -> str:
         "     for every algorithm here simply because the workload saturates.)"
     )
 
-    lines.extend(_format_tradeoff(results["tradeoff_sweep"]))
+    if "tradeoff_sweep" in results:
+        lines.extend(_format_tradeoff(results["tradeoff_sweep"]))
 
     return "\n".join(lines)
 
@@ -626,6 +733,9 @@ def write_starvation_charts(results: Dict, results_dir) -> List:
     results_dir.mkdir(parents=True, exist_ok=True)
     palette = ["#4c78a8", "#9ecae9", "#e45756", "#f58518", "#54a24b", "#88d27a"]
     written = []
+
+    if "starvation" not in results.get("profiles", {}):
+        return written
 
     # --- chart 1: waiting time by priority level --------------------------
     data = results["profiles"]["starvation"]["algorithms"]
@@ -741,26 +851,52 @@ def write_starvation_charts(results: Dict, results_dir) -> List:
     return written
 
 
-def main() -> Dict:
+def main(
+    workload_source: str = "synthetic",
+    workload_path: Optional[str] = None,
+) -> Dict:
     import json
-    from pathlib import Path
 
-    results = run_benchmark()
+    results = run_benchmark(workload_source=workload_source, workload_path=workload_path)
     print(format_tables(results))
 
     results_dir = Path(__file__).resolve().parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    (results_dir / "scheduler.json").write_text(
+    out_name = "scheduler.json"
+    if workload_source == "real":
+        stem = Path(workload_path).stem if workload_path else "real_captured"
+        if stem in {"real_captured", ""}:
+            out_name = "scheduler_real.json"
+        elif stem == "real_captured_concurrent":
+            out_name = "scheduler_real_concurrent.json"
+        else:
+            out_name = f"scheduler_{stem}.json"
+    (results_dir / out_name).write_text(
         json.dumps(results, indent=2), encoding="utf-8"
     )
     charts = write_starvation_charts(results, results_dir)
     print("")
     print("wrote:")
-    print(f"  {results_dir / 'scheduler.json'}")
+    print(f"  {results_dir / out_name}")
     for path in charts:
         print(f"  {path}")
     return results
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="scheduler benchmark")
+    parser.add_argument(
+        "--workload-source",
+        choices=("synthetic", "real"),
+        default="synthetic",
+        help="synthetic seeded profiles (default) or a captured real-data file",
+    )
+    parser.add_argument(
+        "--workload",
+        default=None,
+        help="path to exported real-data JSON (used when --workload-source real)",
+    )
+    args = parser.parse_args()
+    main(workload_source=args.workload_source, workload_path=args.workload)
