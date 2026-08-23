@@ -10,7 +10,7 @@
 
 ## 1. Project Goal
 
-Build a simplified operating system simulator where **LLM agents are processes**. The kernel manages scheduling, memory (context window as RAM), syscalls, IPC, access control, resource allocation, and deadlocks — reimagining classic OS textbook concepts for the LLM-agent era, running on free-tier LLM APIs (Groq, DeepSeek, Gemini) plus local Ollama as offline fallback.
+Build a kernel that governs real LLM agent execution through syscalls, where **LLM agents are processes**. The kernel manages scheduling, memory (context window as RAM), the syscall dispatcher, IPC, access control, resource allocation, and deadlocks — reimagining classic OS textbook concepts for the LLM-agent era, running on free-tier LLM APIs (Groq, DeepSeek, Gemini) plus local Ollama as offline fallback.
 
 **Why this works for grading + portfolio:**
 - Every module maps to OS course topics (scheduling, paging, syscalls, deadlocks, IPC, access control)
@@ -29,7 +29,7 @@ Build a simplified operating system simulator where **LLM agents are processes**
 - Any HTTP client or shell user can pass `agent_id=root` and receive KERNEL privileges.
 - Dashboard state reads (`GET /scheduler/state`, `/memory/state/{agent}`, `/syscalls/log`, etc.) bypass syscall ACL entirely for demo visibility.
 
-This models **how** an OS would enforce privileges *given* a process identity — it does **not** model secure identity issuance. Appropriate for a local single-user simulator; **not** production security.
+This models **how** an OS would enforce privileges *given* a process identity — it does **not** model secure identity issuance. Appropriate for a local single-user course kernel; **not** production security.
 
 Pipeline **generated-code execution** uses a restricted subprocess + AST deny-list (`kernel/sandbox.py`) — honest course-project safeguards, not a hostile-code sandbox.
 

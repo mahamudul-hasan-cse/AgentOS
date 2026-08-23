@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml/badge.svg)](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml)
 
-AIOS is an **LLM Agent Operating System simulator** built for an Operating Systems course project. It reimagines classic OS concepts — process scheduling, virtual memory/paging, syscalls, IPC, access control, deadlocks, and resource allocation — as the management layer for LLM agents, treating each agent request as a process and the LLM context window as physical RAM.
+AIOS is a **kernel that governs real LLM agent execution through syscalls**, built for an Operating Systems course project around classic OS concepts — process scheduling, virtual memory/paging, the syscall dispatcher, IPC, access control, deadlocks, and resource allocation — treating each agent request as a process and the LLM context window as physical RAM.
 
 The dashboard UI uses the working name **AgentOS-Lite**; the repository and environment variables use **AIOS**.
 
@@ -19,7 +19,7 @@ Agent identity in AIOS is **caller-declared, not authenticated**. There is no lo
 - **Any client can claim to be `root` or any other agent.** Nothing stops a modified HTTP request or `python shell/repl.py --agent root` from acting as the built-in admin identity.
 - Several dashboard **read** endpoints (`GET /scheduler/state`, `/memory/state/{agent}`, `/syscalls/log`, `/resources/state`, `/fs/list/{agent}`) expose kernel state **without going through the syscall ACL at all**, so they are world-readable to whoever can reach the API.
 
-This is **appropriate for a local, single-user kernel simulator** where the goal is to *demonstrate* OS mechanisms (privilege levels, quotas, Banker's avoidance, wait-for graphs) in a controlled environment. It is **not a real security boundary** and must not be mistaken for authentication, authorization against hostile users, or multi-tenant isolation.
+This is **appropriate for a local, single-user course kernel** where the goal is to *demonstrate* OS mechanisms (privilege levels, quotas, Banker's avoidance, wait-for graphs) in a controlled environment. It is **not a real security boundary** and must not be mistaken for authentication, authorization against hostile users, or multi-tenant isolation.
 
 **Generated-code execution** (pipeline tester via `TOOL_CALL` / `python_sandbox`) uses a **course-project-grade subprocess safeguard** (AST deny-list, timeout, scratch directory, process-group kill) — not a hardened sandbox. See `kernel/sandbox.py` and the pipeline's `sandbox_review_note` output.
 
