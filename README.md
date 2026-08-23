@@ -23,29 +23,135 @@ This is **appropriate for a local, single-user course kernel** where the goal is
 
 **Generated-code execution** (pipeline tester via `TOOL_CALL` / `python_sandbox`) uses a **course-project-grade subprocess safeguard** (AST deny-list, timeout, scratch directory, process-group kill) — not a hardened sandbox. See `kernel/sandbox.py` and the pipeline's `sandbox_review_note` output.
 
-## What is built (phases 1–23)
+## The Syscall Dispatcher
 
-[`PROJECT_PLAN.md` §5](PROJECT_PLAN.md#5-build-roadmap-commit-history) lists every phase **using the same numbers as `git log --oneline --grep=Phase`**. Phases **1–21 are committed** (note: there is no Phase 8 tag). Phase **22** (Groq/Gemini timeouts, sandbox thread offload) is implemented but not yet committed. Phase **23** is this documentation sync. Highlights:
+Every agent–kernel interaction goes through a single choke point: `SyscallDispatcher.dispatch`. The dispatcher traps the call, applies its gates, routes to the owning subsystem, records status and `latency_ms`, and appends an entry to the syscall log. Scheduling, paging, ACL, quotas, Banker's resource claims, IPC, the semantic FS, and `TOOL_CALL` are **not independent side systems** — they are handlers and gates the dispatcher invokes on the way through.
 
-| Area | What you get |
-|------|----------------|
-| **LLM drivers** | `GroqDriver`, `DeepSeekDriver`, `GeminiDriver`, `OllamaDriver` with explicit timeouts and automatic **Groq/DeepSeek/Gemini → Ollama** fallback |
-| **Scheduler** | FCFS, Round Robin, Priority, MLFQ, plus **priority aging** and **MLFQ boost** starvation variants; process tree with spawn/wait/zombies/kill-tree |
-| **Memory** | Paged context window, FIFO/LRU/**Semantic-LRU**, ChromaDB swap, **copy-on-write** fork semantics |
-| **Syscalls** | Full dispatcher choke point, ENOSYS-before-EPERM, syscall trace, quotas, `TOOL_CALL` sandbox |
-| **IPC** | Async message queue + shared blackboard (used by pipeline and legacy collaborate demo) |
-| **Access control** | KERNEL vs USER privilege, per-agent page and LLM-call-rate quotas |
-| **Resources / deadlock** | Banker's Algorithm avoidance (default) **or** detection + recovery when avoidance is off |
-| **Semantic FS** | Per-agent files with embedding search (`/fs/*`) |
-| **Flagship pipeline** | Researcher → Coder → Tester → Writer, kernel-governed via syscalls (`POST /pipeline/run`) |
-| **Kernel assistant** | In-kernel chat agent with doc search (`/assistant/*`, dashboard Chat panel) |
-| **Time travel** | Ring-buffer kernel snapshots (`/replay/*`, dashboard scrubber) |
-| **Shell** | Interactive REPL over the HTTP API — primary CLI demo ([`shell/README.md`](shell/README.md)) |
-| **Dashboard** | Process table, Gantt, process tree, memory (with COW stats), syscall trace, deadlock panel, pipeline panel, assistant chat, embedding health badge |
-| **Benchmarks** | Seeded scheduler, memory, Belady, and COW evaluation suites ([`benchmarks/README.md`](benchmarks/README.md)) |
-| **Reliability** | Non-blocking startup with `/health`, configurable embedding fallback, driver timeouts, sandbox offloaded from the event loop |
+Order of checks matters: **ENOSYS-before-EPERM**. An unknown syscall type returns `NOT_IMPLEMENTED` before privilege is considered, matching real trap semantics and remaining visible in the log. Known types then face ACL (KERNEL vs USER), per-agent page and LLM-call-rate quotas, and the resource/Banker's gate (provider slot claim before `LLM_CALL`) as applicable. Denials surface as `PERMISSION_DENIED`, `QUOTA_EXCEEDED`, or related statuses in the log — the log is the primary evidence channel.
 
-Full phase-by-phase history: [`PROJECT_PLAN.md` §5](PROJECT_PLAN.md#5-build-roadmap-commit-history).
+Introspection syscalls (`PROC_LIST`, `MEM_STATE`, `RESOURCE_STATE`, `SYSCALL_LOG`) and the ring-buffer state recorder observe the same path: compact snapshots of real dispatcher completions, not a parallel observability stack.
+
+Syscall-facing HTTP entry points (the kernel demo surface):
+
+| Endpoint | Role |
+|----------|------|
+| `POST /generate` | Issues `LLM_CALL` through the dispatcher |
+| `POST /scheduler/spawn` | `SPAWN_AGENT` → process table |
+| `POST /scheduler/wait/{pid}` | `WAIT` / zombie reap |
+| `POST /scheduler/terminate/{pid}` | `TERMINATE_AGENT` |
+| `POST /scheduler/kill-tree/{pid}` | Subtree terminate via the same kill path |
+| `GET /scheduler/state`, `GET /scheduler/tree` | Live process table / hierarchy |
+| `POST /memory/write`, `POST /memory/query` | `MEM_WRITE` / `MEM_READ` → paging / faults |
+| `GET /memory/state/{agent}` | RAM vs swap view of paging |
+| `GET /syscalls/log` | Trace evidence |
+| `GET /resources/state` | Banker's pool allocation state |
+| `POST /resources/mode` | Toggle avoidance on/off |
+| `GET /deadlock/graph`, `/deadlock/status`, `POST /deadlock/detect` | Wait-for graph + detect/recover |
+| `GET/POST /quotas/{agent}` | Quota usage / KERNEL `SET_QUOTA` |
+| `POST /fs/write`, `GET /fs/read`, `POST /fs/search`, `GET /fs/list/{agent}` | File syscalls + listing |
+| `GET /replay/timeline`, `/replay/snapshot/{id}`, `/replay/diff/{a}/{b}` | Snapshot mechanism API |
+
+LLM drivers (`GroqDriver`, `DeepSeekDriver`, `GeminiDriver`, `OllamaDriver`) with explicit timeouts and automatic **Groq/DeepSeek/Gemini → Ollama** fallback sit behind `LLM_CALL` on this path.
+
+Phase-by-phase build history (same numbers as `git log --grep=Phase`): [`PROJECT_PLAN.md` § Build Roadmap](PROJECT_PLAN.md#9-build-roadmap-commit-history).
+
+## Kernel subsystems the dispatcher routes to
+
+Each of the following is a **gate or subsystem the dispatcher routes to**, not a standalone product feature. Evidence is the process table, memory state, wait-for graph, and syscall log — see [The Syscall Dispatcher](#the-syscall-dispatcher).
+
+### Scheduling
+
+FCFS, Round Robin, Priority, and MLFQ, plus **priority aging** and **MLFQ boost** starvation variants. The scheduler owns the ready queue and timelines for processes the dispatcher registers and updates.
+
+### Memory paging
+
+Paged context window (context window as RAM), FIFO / LRU / **Semantic-LRU**, ChromaDB swap, and page-fault reload through `MEM_READ` / `MEM_WRITE`. Resident-set and swap views are kernel state the dispatcher exposes via memory handlers and introspection.
+
+### Deadlock and resource allocation
+
+Banker's Algorithm avoidance (default) **or** detection + recovery when avoidance is off. Provider rate-limit **pools** are part of this resource gate — visible via shell `top` / `GET /resources/state` (no dashboard panel). Wait-for graph and mode toggle go through the deadlock / resources endpoints above.
+
+### Process hierarchy
+
+`SPAWN_AGENT`, `WAIT`, `TERMINATE_AGENT`, and kill-tree mutate a real process table: spawn / wait / zombies / orphans / kill-tree. Hierarchy is kernel truth read back through `/scheduler/tree` and related syscalls.
+
+IPC (async message queue + shared blackboard) and the semantic FS (per-agent files with embedding search) are the same class of trapped surfaces — used heavily by the pipeline and assistant workloads below.
+
+## Workloads that exercise the architecture
+
+These are **real workloads that exercise the syscall architecture under load**, not headline features in their own right.
+
+### Benchmarks (synthetic and real-data)
+
+The algorithms are measured, not just implemented. Seeded suites are reproducible and citable; captured sessions are a separate validation path — see [`benchmarks/README.md`](benchmarks/README.md).
+
+```bash
+python -m benchmarks.scheduler_bench    # FCFS / RR / Priority (+aging) / MLFQ (+boost)
+python -m benchmarks.memory_bench       # FIFO / LRU / Semantic-LRU / Random
+python -m benchmarks.belady_bench       # capacity sweep, Belady's Anomaly
+python -m benchmarks.cow_bench          # copy-on-write savings vs naive fork
+```
+
+**Synthetic (seeded):** statistical rigor — multi-seed scheduler profiles, memory traces, Belady capacity sweep, starvation/aging curves. Re-runs produce byte-identical JSON.
+
+**Real captured execution:** live pipeline + assistant sessions exported from the syscall log (`--workload-source real`). No seed; one session; quote only as practice validation, not as a substitute for the seeded tables. Concurrent capture is required before a ready queue forms and algorithms can diverge.
+
+**Starvation, and what it costs to fix.** Priority scheduling's textbook flaw, demonstrated and then repaired: problem → measurement → solution → measurement. Full write-up: [`benchmarks/README.md` §4](benchmarks/README.md#4-starvation-under-priority-scheduling-and-the-cost-of-fixing-it).
+
+**Belady's Anomaly.** Capacity sweep validating FIFO/LRU/Semantic-LRU behavior, including the canonical FIFO anomaly at 3→4 frames. Full write-up: [`benchmarks/README.md` §3](benchmarks/README.md#3-beladys-anomaly-experiment).
+
+### Copy-on-write
+
+COW fork semantics in the page manager (Phase 17), with a dedicated bench for sharing vs naive fork — kernel-real fork behavior validated under load.
+
+### Flagship pipeline
+
+Researcher → Coder → Tester → Writer, kernel-governed via syscalls (`POST /pipeline/run`, shell `pipeline <task>`): spawn, ACL, quotas, `LLM_CALL`, `TOOL_CALL`, blackboard, and FS under staged multi-agent work.
+
+### Kernel assistant
+
+In-kernel chat agent with doc search (`/assistant/*`): a process that exercises `PROC_LIST` / `MEM_STATE` / `FILE_SEARCH` / `FILE_READ` / `LLM_CALL` (including ACL denial demos).
+
+## Demo / accessibility layer
+
+An **accessibility/demo layer over the kernel state above**. Screenshots are optional; do not lead a demo on the dashboard — prefer `strace`, `pipeline` / `run`, `mem`, `deadlock` / `mode`, and spawn/kill in the shell.
+
+### Dashboard
+
+Next.js dashboard in [`dashboard/`](dashboard/) — live panels (poll every ~2s unless noted):
+
+- **Time Travel** — scrub kernel snapshots from `/replay/timeline`
+- **Process table** + **Gantt chart** (from seeded demo + `/scheduler/state`; `POST /scheduler/gantt` is a throwaway offline simulation and does not mutate live kernel state through the dispatcher)
+- **Process tree** — live hierarchy from `/scheduler/tree`
+- **Memory view** — RAM vs ChromaDB swap, COW accounting
+- **Syscall trace** — last 20 syscalls
+- **Deadlock** — wait-for graph, avoidance toggle, force detect/recover
+- **Pipeline** — run and watch the flagship multi-agent workflow
+- **Kernel assistant** — chat against indexed project docs
+- **Health badge** — active embedding backend (Ollama vs hashing) from `/health`
+
+Provider **rate-limit pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding backend health is shown via the dashboard HealthBadge from `/health`.
+
+See [`dashboard/README.md`](dashboard/README.md) for component details.
+
+### Shell
+
+Interactive REPL over the HTTP API — primary CLI demo ([`shell/README.md`](shell/README.md)):
+
+```bash
+uvicorn api.main:app --port 8000
+python shell/repl.py                              # acts as KERNEL-privileged root
+python shell/repl.py --agent alice                # act as a USER-level agent
+python shell/repl.py --url http://localhost:8010  # custom API port
+```
+
+Commands include `ps`, `top`, `pstree`, `spawn`, `wait`, `kill`, `limits`, `mem`, `ls`, `cat`, `find`, `strace`, `deadlock`, `mode`, `run`, and **`pipeline <task>`** (research → code → test → report).
+
+Remember: `--agent root` is a **declared identity**, not proof of privilege — see [Security & Identity Model](#security--identity-model).
+
+### Time-travel scrubber
+
+Ring-buffer kernel snapshots (`/replay/*`) with a dashboard scrubber for browsing timeline / snapshot / diff. The snapshot mechanism is kernel evidence; the scrubber UI is the demo veneer over it.
 
 ## Quickstart
 
@@ -163,55 +269,38 @@ One environment variable overrides Ollama host in config: **`AIOS_OLLAMA_HOST`**
 
 Startup embedding policy: **`AIOS_STARTUP_EMBEDDINGS=hashing`** (default) switches to the offline hashing embedder before optional doc indexing so boot never blocks on Ollama.
 
-## Shell (primary CLI demo)
+## Project Structure
 
-```bash
-uvicorn api.main:app --port 8000
-python shell/repl.py                              # acts as KERNEL-privileged root
-python shell/repl.py --agent alice                # act as a USER-level agent
-python shell/repl.py --url http://localhost:8010  # custom API port
+```
+AIOS/
+├── kernel/
+│   ├── scheduler/          # algorithms.py, scheduler.py
+│   ├── memory/             # page_manager.py, replacement.py, embeddings.py
+│   ├── syscalls/           # dispatcher.py, types.py
+│   ├── drivers/            # groq, deepseek, gemini, ollama
+│   ├── ipc/                # message_queue.py (blackboard)
+│   ├── access_control/     # acl, quotas, resource_manager, deadlock_detector
+│   ├── filesystem/         # semantic_fs.py
+│   ├── replay/             # recorder.py
+│   └── sandbox.py
+├── agents/                 # pipeline.py, kernel_assistant.py, example_agents.py
+├── api/                    # main.py
+├── shell/                  # repl.py, README.md
+├── dashboard/              # Next.js App Router UI
+├── benchmarks/             # evaluation suites + results/
+├── tests/                  # pytest
+├── PROJECT_PLAN.md
+└── README.md
 ```
 
-Commands include `ps`, `top`, `pstree`, `spawn`, `wait`, `kill`, `limits`, `mem`, `ls`, `cat`, `find`, `strace`, `deadlock`, `mode`, `run`, and **`pipeline <task>`** (research → code → test → report). See [`shell/README.md`](shell/README.md).
+## Limitations & Future Work
 
-Remember: `--agent root` is a **declared identity**, not proof of privilege — see [Security & Identity Model](#security--identity-model).
+Honest constraints for this course kernel:
 
-## Dashboard
-
-Next.js dashboard in [`dashboard/`](dashboard/) — live panels (poll every ~2s unless noted):
-
-- **Time Travel** — scrub kernel snapshots from `/replay/timeline`
-- **Process table** + **Gantt chart** (from seeded demo + `/scheduler/state`)
-- **Process tree** — live hierarchy from `/scheduler/tree`
-- **Memory view** — RAM vs ChromaDB swap, COW accounting
-- **Syscall trace** — last 20 syscalls
-- **Deadlock** — wait-for graph, avoidance toggle, force detect/recover
-- **Pipeline** — run and watch the flagship multi-agent workflow
-- **Kernel assistant** — chat against indexed project docs
-- **Health badge** — active embedding backend (Ollama vs hashing) from `/health`
-
-Provider **rate-limit pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding backend health is shown via the dashboard HealthBadge from `/health`.
-
-See [`dashboard/README.md`](dashboard/README.md) for component details.
-
-## Evaluation
-
-The algorithms are measured, not just implemented. Everything is seeded, so results are reproducible and citable — see [`benchmarks/README.md`](benchmarks/README.md).
-
-```bash
-python -m benchmarks.scheduler_bench    # FCFS / RR / Priority (+aging) / MLFQ (+boost)
-python -m benchmarks.memory_bench       # FIFO / LRU / Semantic-LRU / Random
-python -m benchmarks.belady_bench       # capacity sweep, Belady's Anomaly
-python -m benchmarks.cow_bench          # copy-on-write savings vs naive fork
-```
-
-### Starvation, and what it costs to fix
-
-Priority scheduling's textbook flaw, demonstrated and then repaired: problem → measurement → solution → measurement. Full write-up: [`benchmarks/README.md` §4](benchmarks/README.md#4-starvation-under-priority-scheduling-and-the-cost-of-fixing-it).
-
-### Belady's Anomaly
-
-Capacity sweep validating FIFO/LRU/Semantic-LRU behavior, including the canonical FIFO anomaly at 3→4 frames. Full write-up: [`benchmarks/README.md` §3](benchmarks/README.md#3-beladys-anomaly-experiment).
+- **Not a real security boundary.** Agent identity is caller-declared; dashboard state reads bypass syscall ACL; this must not be mistaken for authentication, authorization against hostile users, or multi-tenant isolation. Generated-code execution is a course-project-grade subprocess safeguard — not a hardened sandbox. (See [Security & Identity Model](#security--identity-model).)
+- **Semantic-LRU — negative result (synthetic).** At n=10, Semantic-LRU does not beat LRU on any seeded trace; embeddings are not inert on locality-bearing traces (beats random there), but the defensible claim is narrower than “beats LRU.” Remaining synthetic limits: 20 pages, 5 resident, 120 accesses, one corpus. Full write-up: [`benchmarks/README.md` §2](benchmarks/README.md#2-memory--page-replacement-benchmark-synthetic-seeded).
+- **Real-data memory caveat (n=1).** Captured-session replay is consistent in direction with “Semantic-LRU fails to beat LRU,” but **n=1** — not a statistical confirmation. Do not fold real-data numbers into the seeded tables. ([`benchmarks/README.md` §6](benchmarks/README.md#6-real-captured-execution).)
+- Checkpoint/restore, multi-tenant virtual kernels, and remote kernel mode were considered during planning but are out of scope for this course kernel.
 
 ## Tech stack
 

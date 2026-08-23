@@ -73,7 +73,80 @@ Pipeline **generated-code execution** uses a restricted subprocess + AST deny-li
 
 ---
 
-## 4. Module Reference (as built)
+## 4. The Syscall Dispatcher
+
+Single choke point: `SyscallDispatcher.dispatch` (`kernel/syscalls/`). Every agent–kernel interaction is trapped, gated, routed, timed (`latency_ms`), and logged. **ENOSYS-before-EPERM**: unknown types return `NOT_IMPLEMENTED` before ACL. ACL, per-agent quotas, and Banker's / resource claims are **gates the dispatcher applies**, not separate products.
+
+Syscall-facing API surface (kernel evidence path):
+
+| Endpoint | Role |
+|----------|------|
+| `POST /generate` | `LLM_CALL` |
+| `POST /scheduler/spawn` | `SPAWN_AGENT` |
+| `POST /scheduler/wait/{pid}` | `WAIT` / zombie reap |
+| `POST /scheduler/terminate/{pid}` | `TERMINATE_AGENT` |
+| `POST /scheduler/kill-tree/{pid}` | Subtree terminate |
+| `GET /scheduler/state`, `GET /scheduler/tree` | Process table / hierarchy |
+| `POST /memory/write`, `POST /memory/query` | `MEM_WRITE` / `MEM_READ` |
+| `GET /memory/state/{agent}` | RAM vs swap |
+| `GET /syscalls/log` | Trace evidence |
+| `GET /resources/state`, `POST /resources/mode` | Banker's pools / avoidance toggle |
+| `GET /deadlock/graph`, `/deadlock/status`, `POST /deadlock/detect` | Wait-for graph + detect/recover |
+| `GET/POST /quotas/{agent}` | Quota usage / `SET_QUOTA` |
+| `POST /fs/write`, `GET /fs/read`, `POST /fs/search`, `GET /fs/list/{agent}` | Semantic FS |
+| `GET /replay/timeline`, `/replay/snapshot/{id}`, `/replay/diff/{a}/{b}` | Snapshot mechanism |
+
+Drivers (`kernel/drivers/`): Groq / DeepSeek / Gemini / Ollama with explicit HTTP timeouts and Ollama fallback behind `LLM_CALL`. `TOOL_CALL` sandbox: `kernel/sandbox.py`.
+
+---
+
+## 5. Kernel subsystems the dispatcher routes to
+
+Each row is a **subsystem the dispatcher routes to** (see §4), not an independent feature list.
+
+| Subsystem | Path | What the dispatcher uses it for |
+|-----------|------|----------------------------------|
+| Scheduler + process tree | `kernel/scheduler/` | FCFS / RR / Priority / MLFQ (+ aging/boost); spawn / wait / zombies / kill-tree |
+| Memory | `kernel/memory/` | Paging, FIFO/LRU/Semantic-LRU, ChromaDB swap, COW, embeddings |
+| Access control / resources | `kernel/access_control/` | ACL, quotas, Banker's, deadlock detector |
+| IPC | `kernel/ipc/` | Message queue + blackboard |
+| Semantic FS | `kernel/filesystem/` | Per-agent files + embedding search |
+
+Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is shown via the dashboard HealthBadge.
+
+---
+
+## 6. Workloads that exercise the architecture
+
+Real workloads under the syscall path — supporting evidence, not the architectural headline.
+
+| Workload | Path / surface | Role |
+|----------|----------------|------|
+| Benchmarks (synthetic + real) | `benchmarks/` | Seeded rigor (§1–5) vs captured validation (§6); see `benchmarks/README.md` |
+| Copy-on-write | `kernel/memory/` + `cow_bench` | Fork sharing vs naive copy |
+| Flagship pipeline | `agents/pipeline.py`, `POST /pipeline/run` | Research → code → test → report via syscalls |
+| Kernel assistant | `agents/kernel_assistant.py`, `/assistant/*` | Doc search + introspection syscalls |
+| Tests | `tests/` | 135+ pytest cases |
+
+---
+
+## 7. Demo / accessibility layer
+
+Thin surfaces over the kernel state in §§4–6. Prefer shell `strace` / `pipeline` / `deadlock` for demos; do not lead with the dashboard.
+
+| Surface | Best for |
+|---------|----------|
+| **Shell** (`shell/repl.py`) | ACL/permission demo (`--agent mallory`), deadlock toggle, `pipeline <task>`, `strace` |
+| **Dashboard** (`dashboard/`) | Live visual demo: panels, pipeline run, assistant chat, time-travel scrubber |
+| **Time travel** (`kernel/replay/`) | Ring-buffer snapshots; scrubber UI is the veneer |
+| **pytest** | Regression proof (135 tests) |
+| **Benchmarks** | Report-grade algorithm measurements |
+
+API chrome: `api/main.py` (startup reliability, `/health`).
+
+---
+
+## 8. Module Reference (as built)
 
 | Module | Path | Notes |
 |--------|------|-------|
@@ -95,7 +168,7 @@ Pipeline **generated-code execution** uses a restricted subprocess + AST deny-li
 
 ---
 
-## 5. Build Roadmap (commit history)
+## 9. Build Roadmap (commit history)
 
 Phase titles below are copied from **`git log --grep=Phase`** commit subjects. There is no Phase 8 tag in the repository (the sequence jumps from 7 to 9).
 
@@ -127,7 +200,7 @@ Phase titles below are copied from **`git log --grep=Phase`** commit subjects. T
 
 ---
 
-## 6. Directory Structure (current)
+## 10. Directory Structure (current)
 
 ```
 AIOS/
@@ -153,18 +226,7 @@ AIOS/
 
 ---
 
-## 7. Demo Surfaces
-
-| Surface | Best for |
-|---------|----------|
-| **Dashboard** | Live visual demo: all panels, pipeline run, assistant chat, time travel |
-| **Shell** | ACL/permission demo (`--agent mallory`), deadlock toggle, `pipeline <task>`, `strace` |
-| **pytest** | Regression proof (135 tests) |
-| **Benchmarks** | Report-grade algorithm measurements |
-
----
-
-## 8. Portfolio Checklist
+## 11. Portfolio Checklist
 
 - [x] Architecture diagram (README + this document)
 - [x] Benchmark write-ups with honest negative results (`benchmarks/README.md`)
@@ -176,7 +238,7 @@ AIOS/
 
 ---
 
-## 9. Notes
+## 12. Notes
 
 - Keep the upstream [agiresearch/AIOS](https://github.com/agiresearch/AIOS) repo as **reference only** — cite as related work, do not copy code.
 - Free-tier API limits change; verify provider consoles before demos.
