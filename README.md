@@ -120,17 +120,15 @@ An **accessibility/demo layer over the kernel state above**. Screenshots are opt
 
 Next.js dashboard in [`dashboard/`](dashboard/) — live panels (poll every ~2s unless noted):
 
-- **Time Travel** — scrub kernel snapshots from `/replay/timeline`
-- **Process table** + **Gantt chart** (from seeded demo + `/scheduler/state`; `POST /scheduler/gantt` is a throwaway offline simulation and does not mutate live kernel state through the dispatcher)
+- **Process table** — live scheduler state from `/scheduler/state`
 - **Process tree** — live hierarchy from `/scheduler/tree`
 - **Memory view** — RAM vs ChromaDB swap, COW accounting
 - **Syscall trace** — last 20 syscalls
 - **Deadlock** — wait-for graph, avoidance toggle, force detect/recover
-- **Pipeline** — run and watch the flagship multi-agent workflow
+- **Pipeline** — run and watch the flagship multi-agent workflow (shows which LLM driver served each stage)
 - **Kernel assistant** — chat against indexed project docs
-- **Health badge** — active embedding backend (Ollama vs hashing) from `/health`
 
-Provider **rate-limit pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding backend health is shown via the dashboard HealthBadge from `/health`.
+**Hidden from the dashboard UI** (code kept): Time Travel scrubber, Gantt chart (offline throwaway sim), and HealthBadge. Provider **rate-limit pools** remain visible via shell `top` / `GET /resources/state`.
 
 See [`dashboard/README.md`](dashboard/README.md) for component details.
 
@@ -151,7 +149,7 @@ Remember: `--agent root` is a **declared identity**, not proof of privilege — 
 
 ### Time-travel scrubber
 
-Ring-buffer kernel snapshots (`/replay/*`) with a dashboard scrubber for browsing timeline / snapshot / diff. The snapshot mechanism is kernel evidence; the scrubber UI is the demo veneer over it.
+Ring-buffer kernel snapshots (`/replay/*`) remain implemented. The dashboard scrubber UI is **hidden** for a simpler demo; the snapshot API is still available.
 
 ## Quickstart
 
@@ -257,7 +255,7 @@ pip install -r requirements-dev.txt
 python -m pytest tests/
 ```
 
-Without `nomic-embed-text` the kernel automatically uses a built-in hashing embedder, so a fresh clone works offline with zero setup — but similarity then reflects shared vocabulary rather than meaning. Whichever backend is active is logged at startup and reported by `GET /health` (dashboard **HealthBadge** shows Ollama vs hashing).
+Without `nomic-embed-text` the kernel automatically uses a built-in hashing embedder, so a fresh clone works offline with zero setup — but similarity then reflects shared vocabulary rather than meaning. Whichever backend is active is logged at startup and reported by `GET /health`.
 
 Dependencies are split deliberately: `requirements.txt` is what the kernel needs to **run**, `requirements-dev.txt` is what you need to **verify** it (pytest). Nothing in the dev file is imported by `kernel/`, `api/`, `agents/`, or `shell/`.
 

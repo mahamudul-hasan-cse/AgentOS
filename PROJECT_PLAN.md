@@ -112,7 +112,7 @@ Each row is a **subsystem the dispatcher routes to** (see §4), not an independe
 | IPC | `kernel/ipc/` | Message queue + blackboard |
 | Semantic FS | `kernel/filesystem/` | Per-agent files + embedding search |
 
-Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is shown via the dashboard HealthBadge.
+Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is reported by `GET /health` (HealthBadge UI is hidden on the dashboard for a simpler demo).
 
 ---
 
@@ -137,7 +137,7 @@ Thin surfaces over the kernel state in §§4–6. Prefer shell `strace` / `pipel
 | Surface | Best for |
 |---------|----------|
 | **Shell** (`shell/repl.py`) | ACL/permission demo (`--agent mallory`), deadlock toggle, `pipeline <task>`, `strace` |
-| **Dashboard** (`dashboard/`) | Live visual demo: panels, pipeline run, assistant chat, time-travel scrubber |
+| **Dashboard** (`dashboard/`) | Live visual demo: process/memory/syscall/deadlock/pipeline + kernel assistant (Time Travel, Gantt, HealthBadge hidden) |
 | **Time travel** (`kernel/replay/`) | Ring-buffer snapshots; scrubber UI is the veneer |
 | **pytest** | Regression proof (135 tests) |
 | **Benchmarks** | Report-grade algorithm measurements |
@@ -242,4 +242,4 @@ AIOS/
 
 - Keep the upstream [agiresearch/AIOS](https://github.com/agiresearch/AIOS) repo as **reference only** — cite as related work, do not copy code.
 - Free-tier API limits change; verify provider consoles before demos.
-- Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is shown via the dashboard HealthBadge.
+- Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is reported by `GET /health` (HealthBadge UI is hidden on the dashboard for a simpler demo).

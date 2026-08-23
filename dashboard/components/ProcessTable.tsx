@@ -2,30 +2,55 @@
 
 import { fetchSchedulerState } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
+import { useMemo, useState } from "react";
 import { Panel, StateBadge } from "./Panel";
 import { HistoryBadge, useTimeTravel } from "./TimeTravelContext";
+
+/** How many recent terminated rows to preview when expanded. */
+const TERMINATED_PREVIEW = 3;
 
 export function ProcessTable() {
   const { data, error } = usePolling(fetchSchedulerState, 2000);
   const { isLive, snapshot } = useTimeTravel();
+  const [showTerminated, setShowTerminated] = useState(false);
 
-  // when scrubbed into the past, render the snapshot's queue instead of live state
   const processes = isLive ? data?.processes ?? [] : snapshot?.processes ?? [];
   const showError = isLive && error;
+
+  const { active, terminated } = useMemo(() => {
+    const active = processes.filter((p) => p.state !== "terminated");
+    const terminated = processes.filter((p) => p.state === "terminated");
+    return { active, terminated };
+  }, [processes]);
+
+  const terminatedShown = showTerminated
+    ? terminated.slice(-TERMINATED_PREVIEW)
+    : [];
+  const terminatedHiddenExtra = showTerminated
+    ? Math.max(0, terminated.length - TERMINATED_PREVIEW)
+    : terminated.length;
+
+  const rows = [...active, ...terminatedShown];
 
   return (
     <Panel
       title="Process Table"
       subtitle={
-        isLive ? (data?.algorithm ? `algorithm: ${data.algorithm}` : "—") : "historical"
+        isLive
+          ? data?.algorithm
+            ? `algorithm: ${data.algorithm}`
+            : "—"
+          : "historical"
       }
     >
       {!isLive && <HistoryBadge label={snapshot?.label} />}
-      {showError && <p className="text-xs text-rose-400">backend unreachable: {error}</p>}
-      {!showError && processes.length === 0 && (
+      {showError && (
+        <p className="text-xs text-rose-400">backend unreachable: {error}</p>
+      )}
+      {!showError && active.length === 0 && terminated.length === 0 && (
         <p className="text-xs text-slate-500">no processes in the queue</p>
       )}
-      {processes.length > 0 && (
+      {!showError && (active.length > 0 || showTerminated) && (
         <table className="w-full text-left text-sm">
           <thead className="text-xs uppercase tracking-wider text-slate-500">
             <tr>
@@ -37,9 +62,11 @@ export function ProcessTable() {
             </tr>
           </thead>
           <tbody className="text-slate-300">
-            {processes.map((p) => (
+            {rows.map((p) => (
               <tr key={p.pid} className="border-t border-slate-800/60">
-                <td className="py-1.5 pr-4 font-semibold text-slate-100">{p.pid}</td>
+                <td className="py-1.5 pr-4 font-semibold text-slate-100">
+                  {p.pid}
+                </td>
                 <td className="py-1.5 pr-4">
                   <StateBadge state={p.state} />
                 </td>
@@ -53,6 +80,23 @@ export function ProcessTable() {
             ))}
           </tbody>
         </table>
+      )}
+      {terminated.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800/80 pt-2 text-[11px] text-slate-500">
+          <span>
+            {terminated.length} terminated hidden
+            {showTerminated && terminatedHiddenExtra > 0
+              ? ` · showing last ${TERMINATED_PREVIEW}`
+              : ""}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowTerminated((v) => !v)}
+            className="rounded border border-slate-700 px-2 py-0.5 text-slate-400 hover:border-slate-500 hover:text-slate-200"
+          >
+            {showTerminated ? "hide terminated" : "show recent terminated"}
+          </button>
+        </div>
       )}
     </Panel>
   );

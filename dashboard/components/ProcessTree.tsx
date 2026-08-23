@@ -2,6 +2,7 @@
 
 import { API_BASE } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
+import { useMemo, useState } from "react";
 import { Panel } from "./Panel";
 
 export interface TreeNode {
@@ -25,7 +26,6 @@ const STATE_STYLES: Record<string, string> = {
   ready: "bg-sky-500/15 text-sky-300 border-sky-500/40",
   waiting: "bg-amber-500/15 text-amber-300 border-amber-500/40",
   terminated: "bg-slate-500/15 text-slate-400 border-slate-500/40",
-  // zombies get their own alarming treatment so they stand out at a glance
   zombie: "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/50",
 };
 
@@ -36,7 +36,34 @@ function countZombies(node: TreeNode): number {
   );
 }
 
-function Node({ node, depth = 0, isLast = true, prefix = "" }: {
+function countTerminated(node: TreeNode): number {
+  return (
+    (node.state === "terminated" ? 1 : 0) +
+    node.children.reduce((sum, child) => sum + countTerminated(child), 0)
+  );
+}
+
+/** Drop terminated leaves/subtrees; keep zombies and any node with live descendants. */
+function pruneTerminated(node: TreeNode): TreeNode | null {
+  const children = node.children
+    .map(pruneTerminated)
+    .filter((c): c is TreeNode => c != null);
+
+  if (node.state === "zombie") {
+    return { ...node, children };
+  }
+  if (node.state === "terminated" && children.length === 0) {
+    return null;
+  }
+  return { ...node, children };
+}
+
+function Node({
+  node,
+  depth = 0,
+  isLast = true,
+  prefix = "",
+}: {
   node: TreeNode;
   depth?: number;
   isLast?: boolean;
@@ -53,7 +80,9 @@ function Node({ node, depth = 0, isLast = true, prefix = "" }: {
         <span className="text-slate-600">{prefix + branch}</span>
         <span
           className={`font-semibold ${
-            isZombie ? "text-fuchsia-300 line-through decoration-fuchsia-500/50" : "text-slate-100"
+            isZombie
+              ? "text-fuchsia-300 line-through decoration-fuchsia-500/50"
+              : "text-slate-100"
           }`}
         >
           {node.pid}
@@ -82,24 +111,53 @@ function Node({ node, depth = 0, isLast = true, prefix = "" }: {
 
 export function ProcessTree() {
   const { data, error } = usePolling(fetchTree, 2000);
+  const [showTerminated, setShowTerminated] = useState(false);
+
   const zombies = data ? countZombies(data) : 0;
+  const terminated = data ? countTerminated(data) : 0;
+
+  const display = useMemo(() => {
+    if (!data) return null;
+    if (showTerminated) return data;
+    return pruneTerminated(data) ?? data;
+  }, [data, showTerminated]);
 
   return (
     <Panel
       title="Process Tree"
-      subtitle={zombies > 0 ? `${zombies} zombie(s) awaiting reap` : "hierarchy"}
+      subtitle={
+        zombies > 0 ? `${zombies} zombie(s) awaiting reap` : "hierarchy"
+      }
     >
-      {error && <p className="text-xs text-rose-400">backend unreachable: {error}</p>}
+      {error && (
+        <p className="text-xs text-rose-400">backend unreachable: {error}</p>
+      )}
       {!error && !data && <p className="text-xs text-slate-500">loading…</p>}
-      {data && (
+      {display && (
         <>
-          <div className="overflow-x-auto">
-            <Node node={data} />
+          <div className="max-h-[280px] overflow-auto">
+            <Node node={display} />
           </div>
           {zombies > 0 && (
             <p className="mt-3 text-[10px] text-fuchsia-400/80">
               zombies hold their exit status until the parent reaps them (WAIT)
             </p>
+          )}
+          {terminated > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-800/80 pt-2 text-[11px] text-slate-500">
+              <span>
+                {showTerminated
+                  ? `showing all · ${terminated} terminated`
+                  : `${terminated} terminated collapsed`}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowTerminated((v) => !v)}
+                className="rounded border border-slate-700 px-2 py-0.5 text-slate-400 hover:border-slate-500 hover:text-slate-200"
+              >
+                {showTerminated ? "hide terminated" : "show terminated"}
+              </button>
+            </div>
           )}
         </>
       )}
