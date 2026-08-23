@@ -190,7 +190,7 @@ Next.js dashboard in [`dashboard/`](dashboard/) — live panels (poll every ~2s 
 - **Kernel assistant** — chat against indexed project docs
 - **Health badge** — active embedding backend (Ollama vs hashing) from `/health`
 
-Provider **rate-limit pools** are visible in shell `top` (`GET /resources/state`), not yet as a dedicated dashboard panel.
+Provider **rate-limit pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding backend health is shown via the dashboard HealthBadge from `/health`.
 
 See [`dashboard/README.md`](dashboard/README.md) for component details.
 

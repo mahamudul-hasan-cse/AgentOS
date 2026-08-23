@@ -180,4 +180,4 @@ AIOS/
 
 - Keep the upstream [agiresearch/AIOS](https://github.com/agiresearch/AIOS) repo as **reference only** — cite as related work, do not copy code.
 - Free-tier API limits change; verify provider consoles before demos.
-- Provider rate-limit **pools** are shown in shell `top`, not yet as a dedicated dashboard panel (embedding health is shown via HealthBadge).
+- Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is shown via the dashboard HealthBadge.
