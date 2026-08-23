@@ -4,7 +4,7 @@
 
 AIOS is a **kernel that governs real LLM agent execution through syscalls**, built for an Operating Systems course project around classic OS concepts — process scheduling, virtual memory/paging, the syscall dispatcher, IPC, access control, deadlocks, and resource allocation — treating each agent request as a process and the LLM context window as physical RAM.
 
-The dashboard UI uses the working name **AgentOS-Lite**; the repository and environment variables use **AIOS**.
+The dashboard UI uses the working name **AgentOS-Lite**; the repository and environment variables use **AIOS**. A polished course write-up lives in [`COURSE_REPORT.md`](COURSE_REPORT.md).
 
 This project is inspired by [agiresearch/AIOS](https://github.com/agiresearch/AIOS) as an architectural reference, but is independently designed and implemented from scratch.
 
