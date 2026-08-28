@@ -91,7 +91,7 @@ def run_python_sandbox(code: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECON
             "sandbox": _sandbox_description(timeout_seconds),
         }
 
-    with tempfile.TemporaryDirectory(prefix="aios_pipeline_") as scratch:
+    with tempfile.TemporaryDirectory(prefix="agentos_pipeline_") as scratch:
         script = Path(scratch) / "generated_task.py"
         script.write_text(code, encoding="utf-8")
         proc = subprocess.Popen(

@@ -1,6 +1,6 @@
 """Example collaborating agents built on the agno framework.
 
-Per the AgentOS-Lite architecture, agents interact with the kernel *only*
+Per the AgentOS architecture, agents interact with the kernel *only*
 through syscalls — they never touch the driver, memory, or IPC subsystems
 directly. Here agno's `Agent` supplies each agent's framework identity
 (name/id), while every LLM call and every blackboard read/write is issued as

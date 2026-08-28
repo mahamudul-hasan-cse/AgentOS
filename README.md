@@ -4,13 +4,13 @@
 
 [![tests](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml/badge.svg)](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml)
 
-Repository: [github.com/mahamudul-hasan-cse/AIOS](https://github.com/mahamudul-hasan-cse/AIOS)
+Repository: [github.com/mahamudul-hasan-cse/AIOS](https://github.com/mahamudul-hasan-cse/AIOS) *(GitHub folder name; project name is **AgentOS**)*
 
-AgentOS (repository name **AIOS**, dashboard label **AgentOS-Lite**) is a course project that applies classic operating-system ideas to multi-agent LLM workloads. Agents do not call kernel subsystems directly; they issue **system calls** trapped by `SyscallDispatcher.dispatch`, which enforces ACL, quotas, and resource gates, routes to the owning subsystem, and logs every outcome.
+AgentOS is a course project that applies classic operating-system ideas to multi-agent LLM workloads. Agents do not call kernel subsystems directly; they issue **system calls** trapped by `SyscallDispatcher.dispatch`, which enforces ACL, quotas, and resource gates, routes to the owning subsystem, and logs every outcome.
 
 This is an **application-level kernel model** in Python — not a replacement for the host OS kernel.
 
-Technical report (STAR format): [`COURSE_REPORT.md`](COURSE_REPORT.md) · Benchmark methods: [`benchmarks/README.md`](benchmarks/README.md)
+Benchmark methods: [`benchmarks/README.md`](benchmarks/README.md) · Project blueprint: [`PROJECT_PLAN.md`](PROJECT_PLAN.md)
 
 ---
 
@@ -236,7 +236,7 @@ Syscall Execution Log  (dispatcher.log)
         ↓
 benchmarks/real_data_export.py
         ↓
-real_captured*.json   (format: aios-real-workload/v1)
+real_captured*.json   (format: agentos-real-workload/v1; legacy aios-real-workload/v1 also accepted)
         ↓
 Scheduler / Memory Benchmark  (--workload-source real)
         ↓
@@ -324,7 +324,7 @@ Quote seeded tables for strong claims; quote real captures as **practice validat
 ## 10. Project Structure
 
 ```text
-AIOS/
+AgentOS/
 ├── api/                 # FastAPI entry (main.py)
 ├── kernel/
 │   ├── syscalls/        # Dispatcher, syscall types
@@ -341,9 +341,8 @@ AIOS/
 ├── dashboard/           # Next.js UI
 ├── benchmarks/          # Benches, real export, workloads, results
 ├── tests/               # pytest suite
-├── docs/                # Demo script (optional)
-├── COURSE_REPORT.md     # STAR technical report
-└── README.md            # This file
+├── docs/                # Optional static project page
+└── README.md            # Course project page (primary)
 ```
 
 ---
@@ -402,8 +401,8 @@ CI runs on push/PR without API keys or Ollama (`.github/workflows/tests.yml`).
 ### Option 1 — Manual
 
 ```bash
-git clone https://github.com/mahamudul-hasan-cse/AIOS.git
-cd AIOS
+git clone https://github.com/mahamudul-hasan-cse/AIOS.git AgentOS
+cd AgentOS
 python -m venv venv
 venv\Scripts\activate          # Windows
 # source venv/bin/activate     # macOS/Linux
@@ -435,7 +434,7 @@ docker compose up
 Dashboard: http://localhost:3000 · API: http://localhost:8000
 
 ```bash
-AIOS_API_PORT=8010 AIOS_DASHBOARD_PORT=3001 docker compose up   # custom ports
+AGENTOS_API_PORT=8010 AGENTOS_DASHBOARD_PORT=3001 docker compose up   # custom ports
 ```
 
 ### Benchmarks
@@ -490,7 +489,5 @@ Generated code runs via `TOOL_CALL` / `python_sandbox` (`kernel/sandbox.py`) —
 
 ## References
 
-- [`COURSE_REPORT.md`](COURSE_REPORT.md) — STAR challenges and evaluation
 - [`benchmarks/README.md`](benchmarks/README.md) — benchmark design and results
-- [`PROJECT_PLAN.md`](PROJECT_PLAN.md) — phase history
-- [agiresearch/AIOS](https://github.com/agiresearch/AIOS) — architectural reference only; this codebase is original
+- [`PROJECT_PLAN.md`](PROJECT_PLAN.md) — phase history and architecture blueprint

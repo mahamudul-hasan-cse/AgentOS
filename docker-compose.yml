@@ -6,9 +6,9 @@
 # configured the kernel runs in Ollama-only mode, which is the same path a
 # fresh clone takes.
 #
-# To use your own provider keys, copy the template and point AIOS_CONFIG at it:
+# To use your own provider keys, copy the template and point AGENTOS_CONFIG at it:
 #   cp kernel/config.yaml.example kernel/config.yaml   # then edit
-#   AIOS_CONFIG=./kernel/config.yaml docker compose up
+#   AGENTOS_CONFIG=./kernel/config.yaml docker compose up
 
 services:
   ollama:
@@ -48,17 +48,17 @@ services:
       # 8000 often lands inside one. The symptom is a bind failure at startup
       # ("access to a socket ... forbidden") even though nothing is listening:
       #   netsh interface ipv4 show excludedportrange protocol=tcp
-      # If 8000 is excluded, run:  AIOS_API_PORT=8010 docker compose up
-      - "${AIOS_API_PORT:-8000}:8000"
+      # If 8000 is excluded, run:  AGENTOS_API_PORT=8010 docker compose up
+      - "${AGENTOS_API_PORT:-${AIOS_API_PORT:-8000}}:8000"
     environment:
       # Wins over the mounted config.yaml, which necessarily says "localhost"
       # because it is written for a host install.
-      AIOS_OLLAMA_HOST: http://ollama:11434
+      AGENTOS_OLLAMA_HOST: http://ollama:11434
     volumes:
       # Config is MOUNTED, never baked into the image, so keys stay on the host.
       # Defaults to the tracked template so a clean clone comes up with no setup
       # at all; the template carries placeholders only, giving Ollama-only mode.
-      - ${AIOS_CONFIG:-./kernel/config.yaml.example}:/app/kernel/config.yaml:ro
+      - ${AGENTOS_CONFIG:-${AIOS_CONFIG:-./kernel/config.yaml.example}}:/app/kernel/config.yaml:ro
       - chroma-data:/app/chroma_db
       - fs-root:/app/fs_root
     depends_on:
@@ -82,10 +82,10 @@ services:
       args:
         # Baked into the client bundle at build time, so it must be the URL the
         # BROWSER uses — the published host port, not the compose service name.
-        # Derived from AIOS_API_PORT so changing the port stays a one-knob edit.
-        NEXT_PUBLIC_API_BASE: http://localhost:${AIOS_API_PORT:-8000}
+        # Derived from AGENTOS_API_PORT so changing the port stays a one-knob edit.
+        NEXT_PUBLIC_API_BASE: http://localhost:${AGENTOS_API_PORT:-${AIOS_API_PORT:-8000}}
     ports:
-      - "${AIOS_DASHBOARD_PORT:-3000}:3000"
+      - "${AGENTOS_DASHBOARD_PORT:-${AIOS_DASHBOARD_PORT:-3000}}:3000"
     depends_on:
       backend:
         condition: service_healthy

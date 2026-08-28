@@ -41,7 +41,7 @@ export default function Home() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold tracking-tight text-slate-100">
-              AgentOS-Lite
+              AgentOS
               <span className="ml-2 text-sm font-normal text-slate-500">
                 kernel dashboard
               </span>

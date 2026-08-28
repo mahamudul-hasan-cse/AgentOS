@@ -1,4 +1,4 @@
-# AIOS Shell (AgentOS-Lite REPL)
+# AgentOS Shell (REPL)
 
 An interactive, Unix-style REPL over the kernel's HTTP API — the primary CLI demo surface. Every command maps onto an existing endpoint.
 
@@ -54,25 +54,25 @@ Commands that default to an agent (`limits`, `ls`) use the shell's `--agent` ide
 
 ```
 $ python shell/repl.py
-AgentOS-Lite shell  -  http://localhost:8000  (agent: root)
+AgentOS shell  -  http://localhost:8000  (agent: root)
 type 'help' for commands, 'exit' to quit.
 
-aios:root$ ps
+agentos:root$ ps
 PID  PPID  STATE       ARRIVAL  REMAINING  PRIO  EXIT
 ---  ----  ----------  -------  ---------  ----  ----
 P1   -     terminated  0        0          1     -
 P2   -     running     1        1          2     -
 
-aios:root$ pipeline write a function that adds two numbers and prints the result
+agentos:root$ pipeline write a function that adds two numbers and prints the result
 pipeline started: researcher -> coder -> tester -> writer
 [running] researcher (pipeline-researcher-...)
 ...
 final tester verdict: PASS
 
-aios:root$ run say hello in one word
+agentos:root$ run say hello in one word
 [groq] Hello.
 
-aios:root$ strace 5
+agentos:root$ strace 5
 TIME      AGENT   SYSCALL     STATUS   LATENCY
 --------  ------  ----------  -------  -------
 12:01:07  root    LLM_CALL    success  812.4ms
@@ -85,7 +85,7 @@ Run the shell as a USER-level agent and watch privileged operations get rejected
 
 ```
 $ python shell/repl.py --agent mallory
-aios:mallory$ kill P1
+agentos:mallory$ kill P1
 permission denied: USER-level agent 'mallory' may not terminate process 'P1' (requires KERNEL privilege)
 ```
 
@@ -96,8 +96,8 @@ Errors are always printed as a clean one-liner — `403 → permission denied`, 
 Deadlock **avoidance** (Banker's Algorithm) is on by default, and while it is on the detector correctly finds nothing — the two are alternative strategies, not layers. To demo detection:
 
 ```
-aios:root$ mode off        # greedy granting; real circular waits can now form
-aios:root$ deadlock        # wait-for graph + cycle status
+agentos:root$ mode off        # greedy granting; real circular waits can now form
+agentos:root$ deadlock        # wait-for graph + cycle status
 ```
 
 Turning avoidance off also starts a background scan that **auto-recovers** any cycle it finds, within one interval. The default interval is 5s, which can make a deadlock vanish before you can look at it. For a demo, raise it in `kernel/config.yaml`:

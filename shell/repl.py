@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AgentOS-Lite interactive shell — a Unix-style REPL over the kernel's HTTP API.
+"""AgentOS interactive shell — a Unix-style REPL over the kernel's HTTP API.
 
 Run against a live FastAPI backend (see api/main.py):
 
@@ -277,7 +277,7 @@ def handle_top(ctx: Context, args: List[str]) -> None:
             header = _resource_header(ctx)
             rows = _process_rows(state)
             _clear_screen()
-            print(f"AgentOS-Lite  {time.strftime('%H:%M:%S')}   {header}\n")
+            print(f"AgentOS  {time.strftime('%H:%M:%S')}   {header}\n")
             if rows:
                 print(format_table(PS_HEADERS, rows))
             else:
@@ -603,11 +603,11 @@ def resolve(line: str) -> Resolution:
 # --------------------------------------------------------------------------
 
 def run_repl(ctx: Context) -> None:
-    print(f"AgentOS-Lite shell  -  {ctx.base_url}  (agent: {ctx.agent})")
+    print(f"AgentOS shell  -  {ctx.base_url}  (agent: {ctx.agent})")
     print("type 'help' for commands, 'exit' to quit.\n")
     while True:
         try:
-            line = input(f"aios:{ctx.agent}$ ")
+            line = input(f"agentos:{ctx.agent}$ ")
         except EOFError:
             print()
             break
@@ -637,7 +637,7 @@ def run_repl(ctx: Context) -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    parser = argparse.ArgumentParser(description="AgentOS-Lite interactive shell")
+    parser = argparse.ArgumentParser(description="AgentOS interactive shell")
     parser.add_argument("--url", default=DEFAULT_URL, help=f"backend base URL (default {DEFAULT_URL})")
     parser.add_argument(
         "--agent",

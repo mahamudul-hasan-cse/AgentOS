@@ -1,4 +1,4 @@
-# AgentOS-Lite Dashboard
+# AgentOS Dashboard
 
 A minimal Next.js (App Router + TypeScript + Tailwind) dashboard that polls the
 FastAPI kernel and shows four live panels:

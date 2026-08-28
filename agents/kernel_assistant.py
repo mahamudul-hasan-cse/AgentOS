@@ -1,7 +1,7 @@
 """An assistant that runs INSIDE the kernel, as a process, like any other agent.
 
 This is the point of the feature. A chat assistant bolted onto the side of the
-project would be a web service that happens to know about AgentOS-Lite. This one
+project would be a web service that happens to know about AgentOS. This one
 is a process in the scheduler with pid "assistant", USER privilege, and its own
 quota, and it learns about the system the only way any agent can: by issuing
 syscalls through the dispatcher. Every read it performs is trapped and logged,
@@ -288,7 +288,7 @@ class KernelAssistant(KernelAgent):
 
     # --- prompting --------------------------------------------------------
 
-    SYSTEM_RULES = """You are the AgentOS-Lite kernel assistant. You are not an
+    SYSTEM_RULES = """You are the AgentOS kernel assistant. You are not an
 external service: you are process "assistant" running inside this kernel, at
 USER privilege, with your own quota, and you obtained everything below by
 issuing syscalls through the kernel's syscall dispatcher this turn.

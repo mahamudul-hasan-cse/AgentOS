@@ -52,7 +52,9 @@ from kernel.filesystem import SemanticFS
 from kernel.memory import PageManager
 from kernel.syscalls import SyscallDispatcher, SyscallStatus, SyscallType
 
-FORMAT = "aios-real-workload/v1"
+FORMAT = "agentos-real-workload/v1"
+LEGACY_FORMAT = "aios-real-workload/v1"
+WORKLOAD_FORMATS = frozenset({FORMAT, LEGACY_FORMAT})
 DEFAULT_WORKLOAD_PATH = Path(__file__).resolve().parent / "workloads" / "real_captured.json"
 DEFAULT_CONCURRENT_WORKLOAD_PATH = (
     Path(__file__).resolve().parent / "workloads" / "real_captured_concurrent.json"
@@ -429,7 +431,7 @@ def load_syscall_dump(path: Path) -> Tuple[List[Dict[str, Any]], List[Dict[str, 
         return [as_record(s) for s in data], []
     if not isinstance(data, dict):
         raise ValueError(f"{path} is not a syscall dump")
-    if data.get("format") == FORMAT:
+    if data.get("format") in WORKLOAD_FORMATS:
         raise ValueError(
             f"{path} is already an exported workload; pass it to the benches "
             "with --workload-source real, not back through the exporter"
@@ -560,7 +562,7 @@ async def capture_session(
     set_embedder(HashingEmbedder())
 
     driver = driver or _choose_driver()
-    scratch = Path(tempfile.mkdtemp(prefix="aios-real-capture-"))
+    scratch = Path(tempfile.mkdtemp(prefix="agentos-real-capture-"))
     acl = AccessControl()
     dispatcher = SyscallDispatcher(
         access_control=acl,

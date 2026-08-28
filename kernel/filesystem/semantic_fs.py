@@ -3,7 +3,7 @@
 Files are stored per-agent under a managed root (`./fs_root/<agent_id>/...`)
 and simultaneously indexed into a dedicated ChromaDB collection so they can be
 retrieved by natural-language query, not just by exact filename — a small
-version of AIOS's LSFS idea.
+version of AgentOS's LSFS idea.
 
 How semantic the search really is depends on the active embedding backend
 (kernel/memory/embeddings.py). With the default OllamaEmbedder it is genuinely

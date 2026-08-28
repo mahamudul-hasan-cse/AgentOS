@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AIOS — Syscall Kernel for LLM Agents</title>
-  <meta name="description" content="AIOS (AgentOS-Lite): a course OS kernel that governs real LLM agents through system calls." />
+  <title>AgentOS — Syscall Kernel for LLM Agents</title>
+  <meta name="description" content="AgentOS: a course OS kernel that governs real LLM agents through system calls." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600;700&display=swap" rel="stylesheet" />
@@ -165,16 +165,16 @@
 <body>
   <header class="hero">
     <div class="wrap">
-      <p class="brand">AIOS</p>
+      <p class="brand">AgentOS</p>
       <p class="tag">
         A course operating-system kernel that governs <strong>real LLM agents</strong> through
         system calls — scheduling, paging, ACL, and deadlock handling as first-class mechanisms,
         not slides.
       </p>
       <div class="cta">
-        <a class="btn btn-primary" href="#demo">Watch demo</a>
+        <a class="btn btn-primary" href="https://github.com/mahamudul-hasan-cse/AIOS#13-how-to-run">Run locally</a>
         <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AIOS">GitHub repository</a>
-        <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/COURSE_REPORT.md">Technical report</a>
+        <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/README.md">Project README</a>
       </div>
     </div>
   </header>
@@ -184,11 +184,11 @@
       <div class="wrap">
         <p class="lead">
           Prefer the <a href="https://github.com/mahamudul-hasan-cse/AIOS"><strong>GitHub repository README</strong></a>
-          as the course project page (intro + demo video + skills). This static page is optional.
+          as the course project page (architecture, syscall evidence, benchmarks, how to run). This static page is optional.
         </p>
         <h2>Short introduction</h2>
         <p class="lead">
-          AIOS (dashboard name <em>AgentOS-Lite</em>) maps textbook OS ideas onto multi-agent LLM
+          AgentOS maps textbook OS ideas onto multi-agent LLM
           workloads. Every meaningful agent–kernel interaction goes through
           <code>SyscallDispatcher.dispatch</code>. A research→code→test→report pipeline and a
           kernel assistant exercise that path live; synthetic and real-captured benches evaluate
@@ -203,32 +203,20 @@ Evidence: Syscall Trace / shell strace · Process tree · Memory state · Bench 
 
     <section id="demo">
       <div class="wrap">
-        <h2>Video demo <span class="accent-dot">(2–5 minutes)</span></h2>
+        <h2>Live demo path</h2>
         <p class="lead">
-          Walkthrough of pipeline + syscall evidence + assistant + real-data bench artifact.
-          Recording script: <a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/docs/DEMO_VIDEO_SCRIPT.md">DEMO_VIDEO_SCRIPT.md</a>.
+          Run the kernel locally, then exercise the flagship pipeline, syscall trace, kernel assistant, and real-data benches.
+          Step-by-step commands are in the
+          <a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/README.md#13-how-to-run">README — How to run</a>.
         </p>
         <div class="video-frame" id="player">
-          <!--
-            After you upload the demo:
-            1) YouTube/Vimeo: replace the iframe src below and remove the placeholder + local <video>.
-            2) Or commit docs/media/demo.mp4 and keep the <video> tag.
-          -->
           <div class="video-placeholder" id="video-placeholder">
-            <strong>Demo video slot ready</strong>
-            <div>Record with the script in <code>docs/DEMO_VIDEO_SCRIPT.md</code>, then either:</div>
-            <div>Embed YouTube here, or place <code>docs/media/demo.mp4</code></div>
+            <strong>Interactive demo</strong>
+            <div>Start API + dashboard, run <code>pipeline</code> from the shell, and inspect syscall logs in the UI.</div>
+            <div>Optional: commit <code>docs/media/demo.mp4</code> or embed a YouTube iframe here.</div>
           </div>
           <!-- Uncomment after adding docs/media/demo.mp4:
           <video controls playsinline poster="" src="media/demo.mp4"></video>
-          -->
-          <!-- Uncomment after uploading to YouTube (replace VIDEO_ID):
-          <iframe
-            src="https://www.youtube.com/embed/VIDEO_ID"
-            title="AIOS demo"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen
-          ></iframe>
           -->
         </div>
       </div>
@@ -264,8 +252,8 @@ Evidence: Syscall Trace / shell strace · Process tree · Memory state · Bench 
         <h2>Links for graders</h2>
         <ul>
           <li><a href="https://github.com/mahamudul-hasan-cse/AIOS">Source repository (GitHub folder)</a></li>
-          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/COURSE_REPORT.md">STAR technical report</a></li>
-          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/README.md">README — architecture &amp; security model</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/README.md">README — architecture, course requirements &amp; security model</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/PROJECT_PLAN.md">PROJECT_PLAN — phase history &amp; blueprint</a></li>
           <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/benchmarks/README.md">Benchmarks (synthetic + real data)</a></li>
         </ul>
       </div>
@@ -274,7 +262,7 @@ Evidence: Syscall Trace / shell strace · Process tree · Memory state · Bench 
 
   <footer>
     <div class="wrap">
-      AIOS / AgentOS-Lite · Mahamudul Hasan ·
+      AgentOS · Mahamudul Hasan ·
       <a href="https://github.com/mahamudul-hasan-cse/AIOS">github.com/mahamudul-hasan-cse/AIOS</a>
     </div>
   </footer>

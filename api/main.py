@@ -18,14 +18,17 @@ from kernel.syscalls import Syscall, SyscallDispatcher, SyscallStatus, SyscallTy
 STARTUP_MEMORY_DEMO_TIMEOUT = 10.0
 STARTUP_ASSISTANT_INDEX_TIMEOUT = 30.0
 STARTUP_DEADLOCK_MONITOR_TIMEOUT = 5.0
-STARTUP_EMBEDDINGS_ENV = "AIOS_STARTUP_EMBEDDINGS"
+STARTUP_EMBEDDINGS_ENV = "AGENTOS_STARTUP_EMBEDDINGS"
+LEGACY_STARTUP_EMBEDDINGS_ENV = "AIOS_STARTUP_EMBEDDINGS"
 STARTUP_EMBEDDINGS_HASHING = "hashing"
 STARTUP_EMBEDDINGS_ACTIVE = "active"
 
 
 def _apply_startup_embedding_policy_before_dispatcher() -> dict:
     """Select the startup embedder before Chroma collections are opened."""
-    policy = os.environ.get(STARTUP_EMBEDDINGS_ENV, STARTUP_EMBEDDINGS_HASHING)
+    policy = os.environ.get(STARTUP_EMBEDDINGS_ENV) or os.environ.get(
+        LEGACY_STARTUP_EMBEDDINGS_ENV, STARTUP_EMBEDDINGS_HASHING
+    )
     policy = policy.strip().lower()
 
     if policy in {STARTUP_EMBEDDINGS_ACTIVE, "ollama", "semantic"}:
@@ -366,7 +369,7 @@ async def lifespan(app: FastAPI):
         await dispatcher.deadlock_detector.stop()
 
 
-app = FastAPI(title="AgentOS-Lite", lifespan=lifespan)
+app = FastAPI(title="AgentOS", lifespan=lifespan)
 # This is a local development kernel for a course project, not an
 # internet-facing service, so a permissive policy across localhost ports is
 # appropriate: the dashboard routinely moves to :3001+ when :3000 is taken, and

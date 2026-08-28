@@ -11,10 +11,11 @@ class OllamaDriver(LLMDriver):
 
     def __init__(self):
         super().__init__()
-        # AIOS_OLLAMA_HOST wins over config: inside a container the mounted
-        # config.yaml points at the host's localhost, not the Ollama service.
-        self.host: str = os.environ.get("AIOS_OLLAMA_HOST") or self.config.get(
-            "host", "http://localhost:11434"
+        # AGENTOS_OLLAMA_HOST (legacy AIOS_OLLAMA_HOST) wins over config.
+        self.host: str = (
+            os.environ.get("AGENTOS_OLLAMA_HOST")
+            or os.environ.get("AIOS_OLLAMA_HOST")
+            or self.config.get("host", "http://localhost:11434")
         )
         self.model: str = self.config.get("model", "llama3")
 

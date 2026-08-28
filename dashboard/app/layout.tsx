@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AgentOS-Lite — Kernel Dashboard",
+  title: "AgentOS — Kernel Dashboard",
   description: "Live view of the LLM-agent operating system kernel",
 };
 

@@ -200,13 +200,10 @@ def build_embedder(config: Optional[dict] = None) -> Embedder:
 
     backend = str(embed_cfg.get("backend", "ollama")).lower()
     model = embed_cfg.get("model", DEFAULT_OLLAMA_EMBED_MODEL)
-    # AIOS_OLLAMA_HOST wins over config on purpose. The deployment environment
-    # knows the topology; a config.yaml mounted from the host will say
-    # "localhost:11434", which inside a container points at the container itself
-    # rather than the Ollama service. Config still wins over the built-in
-    # default, so nothing changes for a normal local install.
+    # AGENTOS_OLLAMA_HOST (legacy AIOS_OLLAMA_HOST) wins over config on purpose.
     host = (
-        os.environ.get("AIOS_OLLAMA_HOST")
+        os.environ.get("AGENTOS_OLLAMA_HOST")
+        or os.environ.get("AIOS_OLLAMA_HOST")
         or embed_cfg.get("host")
         or ollama_cfg.get("host")
         or DEFAULT_OLLAMA_HOST

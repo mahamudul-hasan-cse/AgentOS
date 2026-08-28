@@ -1,10 +1,8 @@
-# AIOS (AgentOS-Lite) — Project Blueprint
+# AgentOS — Project Blueprint
 
-> **Status:** Phases **1–21** match tagged commits in `git log`. **Phase 22** (request-path reliability) is implemented in the working tree but not yet committed. **Phase 23** (this documentation sync) is the docs-only commit that follows. Phase numbers here are taken from commit messages, not renumbered.
+> **Status:** Phases **1–31** are committed in `git log`. Phase numbers follow commit messages (no Phase 8 tag — sequence jumps from 7 to 9).
 >
-> Repository name: **AIOS**. Dashboard/shell banner: **AgentOS-Lite**.
->
-> Inspired by: [AIOS (agiresearch/AIOS)](https://github.com/agiresearch/AIOS) — architecture concepts only, code built from scratch.
+> Project name: **AgentOS**. GitHub repository folder: `mahamudul-hasan-cse/AIOS`.
 
 ---
 
@@ -17,6 +15,16 @@ Build a kernel that governs real LLM agent execution through syscalls, where **L
 - A real running system with dashboard and shell — not slides alone
 - **Semantic-LRU** page replacement is an original algorithmic contribution with benchmark evidence
 - Flagship **research → code → test → report** pipeline demonstrates kernel-governed multi-agent work
+- [`README.md`](README.md) is the primary course project page (syscall path, real vs modeled execution, real-data pipeline, limitations)
+
+### Course requirements (summary)
+
+| Requirement | Evidence in this repo |
+|-------------|----------------------|
+| System-call-based design | Core agent path through `SyscallDispatcher.dispatch` (see README §3–4) |
+| Real execution | Live LLM drivers, `TOOL_CALL` subprocess sandbox, paging/ChromaDB, ACL/quotas |
+| Real-data optimization | `benchmarks/real_data_export.py` → `workloads/real_captured*.json` → `--workload-source real` |
+| Honest scope | Documented exceptions (dashboard GETs, offline Gantt, bootstrap seed, pipeline UI badges) |
 
 ---
 
@@ -68,8 +76,13 @@ Pipeline **generated-code execution** uses a restricted subprocess + AST deny-li
 ```
 
 **Intentional exceptions to "everything through syscalls":**
-- `POST /scheduler/gantt` runs a throwaway simulation for the Gantt chart (does not mutate live kernel state through the dispatcher).
+- `POST /scheduler/gantt` runs an **offline** throwaway simulation for the Gantt chart — it does **not** mutate the live scheduler queue.
 - Several `GET` endpoints expose read-only kernel state directly for dashboard polling (no ACL).
+- `POST /resources/mode` toggles Banker's avoidance / deadlock monitor (ops control).
+- `_seed_scheduler_demo()` at API startup seeds a sample queue for an empty dashboard (bootstrap only).
+- Pipeline `_set_process_state()` updates dashboard badges between async stages; spawn/mem/IPC/LLM still use dispatch.
+
+**CPU scheduling at runtime:** live pipeline stages run sequentially in asyncio. FCFS, RR, Priority, MLFQ (+ aging/boost) evaluate **recorded workloads** (benchmarks, offline Gantt) — they do not preempt live asyncio tasks on the host.
 
 ---
 
@@ -125,8 +138,8 @@ Real workloads under the syscall path — supporting evidence, not the architect
 | Benchmarks (synthetic + real) | `benchmarks/` | Seeded rigor (§1–5) vs captured validation (§6); see `benchmarks/README.md` |
 | Copy-on-write | `kernel/memory/` + `cow_bench` | Fork sharing vs naive copy |
 | Flagship pipeline | `agents/pipeline.py`, `POST /pipeline/run` | Research → code → test → report via syscalls |
-| Kernel assistant | `agents/kernel_assistant.py`, `/assistant/*` | Doc search + introspection syscalls |
-| Tests | `tests/` | 135+ pytest cases |
+| Kernel assistant | `agents/kernel_assistant.py`, `/assistant/*` | Doc search + introspection syscalls; registers via `SPAWN_AGENT` |
+| Tests | `tests/` | 151 pytest cases |
 
 ---
 
@@ -139,7 +152,7 @@ Thin surfaces over the kernel state in §§4–6. Prefer shell `strace` / `pipel
 | **Shell** (`shell/repl.py`) | ACL/permission demo (`--agent mallory`), deadlock toggle, `pipeline <task>`, `strace` |
 | **Dashboard** (`dashboard/`) | Live visual demo: process/memory/syscall/deadlock/pipeline + kernel assistant (Time Travel, Gantt, HealthBadge hidden) |
 | **Time travel** (`kernel/replay/`) | Ring-buffer snapshots; scrubber UI is the veneer |
-| **pytest** | Regression proof (135 tests) |
+| **pytest** | Regression proof (151 tests) |
 | **Benchmarks** | Report-grade algorithm measurements |
 
 API chrome: `api/main.py` (startup reliability, `/health`).
@@ -164,7 +177,7 @@ API chrome: `api/main.py` (startup reliability, `/health`).
 | Shell | `shell/repl.py` | Interactive REPL |
 | Dashboard | `dashboard/` | Next.js live panels |
 | Benchmarks | `benchmarks/` | Seeded evaluation suites |
-| Tests | `tests/` | 135+ pytest cases |
+| Tests | `tests/` | 151 pytest cases |
 
 ---
 
@@ -195,15 +208,20 @@ Phase titles below are copied from **`git log --grep=Phase`** commit subjects. T
 | 19 | Starvation demonstration and aging-based mitigation | Committed |
 | 20 | CI, Docker, and a reproducible quickstart | Committed |
 | 21 | Kernel-governed multi-agent pipeline | Committed |
-| 22 | Request-path reliability — Groq/Gemini explicit timeouts; sandbox TOOL_CALL offloaded via `asyncio.to_thread` | **Implemented; not yet committed** |
-| 23 | Documentation sync — README, PROJECT_PLAN, shell README (security/identity model, pipeline command) | **This commit** |
+| 22 | Request-path reliability — Groq/Gemini explicit timeouts; sandbox TOOL_CALL offloaded via `asyncio.to_thread` | Committed |
+| 23 | Documentation sync — README, PROJECT_PLAN, shell README | Committed |
+| 27 | Documentation framing pass — kernel governs real execution, not simulation | Committed |
+| 28 | Remove unbuilt provider-panel promise, feature-freeze cleanup | Committed |
+| 29 | Restructure README/PROJECT_PLAN around syscall dispatcher | Committed |
+| 30 | Real-data benches, kernel assistant, dashboard panels, Groq model migration | Committed |
+| 31 | Dashboard demo polish — sectioned layout, hide low-priority panels | Committed |
 
 ---
 
 ## 10. Directory Structure (current)
 
 ```
-AIOS/
+AgentOS/
 ├── kernel/
 │   ├── scheduler/          # algorithms.py, scheduler.py
 │   ├── memory/             # page_manager.py, replacement.py, embeddings.py
@@ -232,14 +250,13 @@ AIOS/
 - [x] Benchmark write-ups with honest negative results (`benchmarks/README.md`)
 - [x] Flagship multi-agent pipeline with inspectable syscall trace
 - [x] Security/identity model documented prominently
-- [ ] Short demo GIF/video
-- [ ] Course report / blog post
+- [x] Repository README as primary course project page
 - [ ] Migrate Gemini driver to `google.genai` (deprecated package warning)
 
 ---
 
 ## 12. Notes
 
-- Keep the upstream [agiresearch/AIOS](https://github.com/agiresearch/AIOS) repo as **reference only** — cite as related work, do not copy code.
 - Free-tier API limits change; verify provider consoles before demos.
 - Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is reported by `GET /health` (HealthBadge UI is hidden on the dashboard for a simpler demo).
+- Course write-up is maintained separately from this repo; use [`README.md`](README.md) and [`benchmarks/README.md`](benchmarks/README.md) as the in-repo evidence package.
