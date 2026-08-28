@@ -75,6 +75,31 @@ def _validate_python(code: str) -> List[str]:
     return violations
 
 
+def _sandbox_subprocess_env() -> Dict[str, str]:
+    """Environment for the isolated child interpreter.
+
+    ``-I`` ignores inherited variables, so we pass an explicit minimal set.
+    Python 3.10 (notably on Windows, and some Linux CI images) can fail to
+    start with only UTF-8 flags unless hash-seed and OS bootstrap vars exist.
+    """
+    env: Dict[str, str] = {
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
+        "PYTHONHASHSEED": "0",
+    }
+    if os.name == "nt":
+        for key in ("SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "USERPROFILE"):
+            value = os.environ.get(key)
+            if value:
+                env[key] = value
+    else:
+        for key in ("HOME", "PATH", "LANG", "LC_ALL", "TMPDIR"):
+            value = os.environ.get(key)
+            if value:
+                env[key] = value
+    return env
+
+
 def run_python_sandbox(code: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> Dict[str, Any]:
     """Execute Python code with demo-grade subprocess safeguards."""
     started = time.perf_counter()
@@ -97,7 +122,7 @@ def run_python_sandbox(code: str, timeout_seconds: float = DEFAULT_TIMEOUT_SECON
         proc = subprocess.Popen(
             [sys.executable, "-I", "-B", str(script)],
             cwd=scratch,
-            env={"PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"},
+            env=_sandbox_subprocess_env(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
