@@ -424,6 +424,14 @@ class PipelineRunner:
             publish(stage)
 
     def _set_process_state(self, pid: str, state: str) -> None:
+        """Dashboard-only process state markers during async pipeline stages.
+
+        Live pipeline stages run sequentially in asyncio; they are *not*
+        scheduled by FCFS/RR/MLFQ at runtime. Spawn, quotas, memory, IPC, LLM,
+        and tool execution still go through ``dispatch()``; this helper only
+        updates the visible ``running`` / ``terminated`` badge in the process
+        table between those syscall-governed units.
+        """
         process: Optional[Process] = self.dispatcher.scheduler.get(pid)
         if process is not None:
             process.state = state

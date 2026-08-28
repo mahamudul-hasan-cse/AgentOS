@@ -47,7 +47,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from kernel.access_control import AccessControl, QuotaManager
+from kernel.access_control import AccessControl, AgentPrivilege, QuotaManager
 from kernel.filesystem import SemanticFS
 from kernel.memory import PageManager
 from kernel.syscalls import SyscallDispatcher, SyscallStatus, SyscallType
@@ -86,6 +86,24 @@ DEFAULT_ASSISTANT_QUESTIONS = (
     "How are provider rate-limit pools allocated?",
     "What syscalls have you issued recently?",
 )
+
+
+async def _set_quota_via_syscall(
+    dispatcher: SyscallDispatcher,
+    agent_id: str,
+    *,
+    max_pages: int = 200,
+    max_calls_per_minute: int = 40,
+) -> None:
+    """Raise capture quotas through SET_QUOTA (logged), not a direct manager call."""
+    dispatcher.acl.registry.register(dispatcher.KERNEL_AGENT, AgentPrivilege.KERNEL)
+    await dispatcher.dispatch(
+        dispatcher.KERNEL_AGENT,
+        SyscallType.SET_QUOTA,
+        target_agent_id=agent_id,
+        max_pages=max_pages,
+        max_calls_per_minute=max_calls_per_minute,
+    )
 
 
 def _enum(value: Any) -> str:
@@ -504,7 +522,7 @@ async def _persist_session_memory(dispatcher: SyscallDispatcher) -> Dict[str, in
 
     written = 0
     for agent, page_id, content in writes:
-        dispatcher.quota_manager.set_quota(agent, max_pages=200, max_calls_per_minute=40)
+        await _set_quota_via_syscall(dispatcher, agent)
         syscall = await dispatcher.dispatch(
             agent, SyscallType.MEM_WRITE, page_id=page_id, content=content
         )
@@ -567,9 +585,9 @@ async def capture_session(
     )
 
     assistant = KernelAssistant(dispatcher)
-    assistant.register(priority=1)
-    dispatcher.quota_manager.set_quota(
-        ASSISTANT_PID, max_pages=200, max_calls_per_minute=40
+    await assistant.register(priority=1)
+    await _set_quota_via_syscall(
+        dispatcher, ASSISTANT_PID, max_pages=200, max_calls_per_minute=40
     )
 
     provenance: Dict[str, Any] = {

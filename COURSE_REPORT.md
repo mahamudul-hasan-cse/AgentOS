@@ -1,44 +1,153 @@
-# AIOS (AgentOS-Lite) — Course Project Report
+# Technical Report — AIOS (AgentOS-Lite)
 
-**Repository:** [mahamudul-hasan-cse/AIOS](https://github.com/mahamudul-hasan-cse/AIOS)  
-**Working name (dashboard/shell):** AgentOS-Lite  
-**Project status:** Feature-complete through Phase 31 (demo polish); feature freeze in effect  
-**Related work (reference only):** [agiresearch/AIOS](https://github.com/agiresearch/AIOS) — architecture concepts; this codebase is original
-
----
-
-## 1. Abstract
-
-AIOS is a course-project **kernel that governs real LLM agent execution through syscalls**. Classic operating-system ideas — process scheduling, virtual memory / paging, the syscall trap, IPC, access control, resource allocation, and deadlock handling — are applied to LLM agents: each agent request is treated as a process, and the LLM context window is treated as physical RAM.
-
-The system is not a slide-deck simulator of an OS. Live work (pipeline stages, assistant questions, memory reads/writes) goes through a single dispatcher, is logged with status and latency, and can be inspected via a shell and dashboard. Algorithms are evaluated with **seeded synthetic benches** for statistical rigor and **real captured syscall workloads** for practice validation.
+**Course:** Operating Systems Project  
+**Project title:** AIOS — A Syscall-Governed Kernel for LLM Agents  
+**Repository / project page:** [https://github.com/mahamudul-hasan-cse/AIOS](https://github.com/mahamudul-hasan-cse/AIOS) (README = intro + demo video + skills)  
+**Author:** Mahamudul Hasan  
+**Student ID:** _[fill before portal upload]_  
+**Status:** Feature-complete (Phase 31); feature freeze for demo honesty  
 
 ---
 
-## 2. Problem statement and goals
+## 1. Short introduction
 
-### 2.1 Problem
+AIOS is a **working kernel**, not a slide-deck OS simulator. It treats each LLM agent request as a **process** and the LLM context window as **physical RAM**. Agent–kernel work is trapped through a single choke point — `SyscallDispatcher.dispatch` — which applies ACL, quotas, and Banker's resource claims, then routes to scheduling, paging, IPC, filesystem, and tool execution. A multi-agent **research → code → test → report** pipeline and a **kernel assistant** exercise that path with real LLM providers. Algorithms are measured with seeded synthetic benches and **real captured syscall workloads**.
 
-LLM multi-agent demos often hide OS concerns behind ad-hoc orchestration. Reviewers cannot see scheduling, paging, privilege checks, or resource contention as first-class mechanisms. A course OS project needs a **running system** where those mechanisms are visible and measurable.
-
-### 2.2 Goals
-
-1. Map textbook OS topics onto an LLM-agent runtime.
-2. Make every meaningful agent–kernel interaction a **trapped syscall** (logged and gated).
-3. Provide inspectable demos: shell (`strace`, `pipeline`, …) and dashboard.
-4. Measure algorithms honestly — including negative results — with reproducible benches and optional real-data replay.
-
-### 2.3 Non-goals
-
-- Production authentication / multi-tenant isolation  
-- Hardened sandbox for hostile code  
-- Checkpoint/restore, remote kernel mode, or multi-tenant virtual kernels (considered in planning; out of scope)
+This report focuses on the **challenges** of building that system, written in the required **STAR** format (Situation → Task → Action → Result).
 
 ---
 
-## 3. System overview
+## 2. Project goals (what “done” meant)
 
-### 3.1 Architecture (mental model)
+| Goal | How it shows up in the system |
+|------|-------------------------------|
+| Map classic OS topics onto LLM agents | Scheduler, paging, dispatcher, ACL, quotas, deadlock, process tree |
+| Gather live work through system calls | Agents and mutating demos call `dispatcher.dispatch()`; evidence in `strace` / Syscall Trace |
+| Avoid fake live paths | Real LLM drivers + real `subprocess` for tester code (AST reject only when unsafe) |
+| Optimize / evaluate with real data | `benchmarks/real_data_export.py` + `--workload-source real` |
+| Make demos inspectable | Shell + Next.js dashboard (process tree, memory, syscall log, pipeline, assistant) |
+
+Non-goals: production auth, hostile-code jail, multi-tenant virtual kernels.
+
+---
+
+## 3. Challenges in STAR format
+
+### Challenge A — Making the dispatcher the real center (not a thin wrapper)
+
+**Situation**  
+Early designs risked looking like “agents calling Python helpers,” with scheduling, memory, and ACL bolted on as separate demos. Course criteria required that **data and control** go through system calls, not ad-hoc bypasses.
+
+**Task**  
+Build one trap path that every meaningful agent action uses, with visible status and latency, so a grader can prove the kernel is in the loop.
+
+**Action**  
+- Implemented `SyscallDispatcher.dispatch` as the single choke point (trap → ENOSYS-before-EPERM → ACL → quotas → Banker's claim → handler → log).  
+- Routed LLM calls, memory R/W, spawn/wait/terminate, FS, IPC, and `TOOL_CALL` through that path.  
+- Exposed evidence via `GET /syscalls/log` and shell `strace`.  
+- Documented honest exceptions: dashboard **read** endpoints and a few ops writes intentionally bypass ACL/dispatch for visibility (see README *Security & Identity Model*).
+
+**Result**  
+Live pipeline and assistant turns produce a dense, inspectable syscall trace. The architectural story is “dispatcher first,” not “feature checklist.” Remaining gaps (e.g. some GET state routes, Gantt queue replace, assistant registration) are documented rather than hidden — appropriate for a course kernel, not claimed as production isolation.
+
+---
+
+### Challenge B — “No simulation” vs offline schedule visualization
+
+**Situation**  
+The project needed live, real execution, but OS courses also expect Gantt-style schedule diagrams. A throwaway schedule run can look like the whole system is simulated.
+
+**Task**  
+Keep the **live agent path real** while still supporting schedule visualization without lying about what is simulated.
+
+**Action**  
+- Kept LLM generation on real drivers (Groq / DeepSeek / Gemini / Ollama) with measured `latency_ms`.  
+- Implemented pipeline tester execution as real `subprocess.Popen` in `kernel/sandbox.py` (AST deny-list rejects unsafe code; no canned PASS path).  
+- Implemented `POST /scheduler/gantt` as an offline timeline on throwaway `Scheduler` copies; documented it as offline visualization.  
+- Hid Gantt and Time Travel from the simplified dashboard so the viva path emphasizes Trace / Tree / Memory / Pipeline / Assistant.
+
+**Result**  
+Demo narrative is clear: agents are governed live; Gantt is an optional offline chart tool. Reviewers can verify tester runs via sandbox exit codes and syscall log entries for `TOOL_CALL`.
+
+---
+
+### Challenge C — Semantic-LRU looked clever but did not beat LRU
+
+**Situation**  
+Semantic-LRU (evict by embedding distance) was a natural “AI twist” on paging. Early expectations assumed it would dominate classic LRU on paraphrased / clustered traces.
+
+**Task**  
+Evaluate replacement policies honestly for the course — including negative results — with reproducible methodology.
+
+**Action**  
+- Built seeded synthetic memory benches (`memory_bench.py`) across sequential, random, looping, clustered, and paraphrased traces.  
+- Used real embeddings when Ollama/`nomic-embed-text` is available; documented hashing fallback as unfair for Semantic-LRU.  
+- Reported multi-seed fault rates instead of cherry-picking a single run.
+
+**Result**  
+At the project’s n=10 synthetic setting, **Semantic-LRU does not beat LRU**. Embeddings are not useless (they beat random on locality-bearing traces), but the defensible claim is narrower than “semantic paging wins.” That honesty strengthens the report more than an inflated claim.
+
+---
+
+### Challenge D — Priority scheduling starvation and proving the fix
+
+**Situation**  
+Priority scheduling can starve low-priority work when high-priority arrivals keep arriving — textbook theory that is easy to assert and hard to show with numbers.
+
+**Task**  
+Demonstrate the failure mode, implement a mitigation, and re-measure so the “fix” is evidence-based.
+
+**Action**  
+- Added starvation growth / by-priority / tradeoff benches and charts under `benchmarks/`.  
+- Implemented **priority aging** (and MLFQ boost variants) as scheduler policy options.  
+- Compared wait/response behavior before vs after aging on the same seeded workloads.
+
+**Result**  
+Charts and JSON under `benchmarks/results/` show starvation under plain priority and improvement under aging — a complete loop: problem → measure → fix → measure.
+
+---
+
+### Challenge E — Synthetic benches alone were not enough for “real data”
+
+**Situation**  
+Seeded synthetic profiles are statistically useful but can be dismissed as “assumed” workloads. The course asked for optimization/evaluation that uses **captured** execution, not only synthetic assumptions.
+
+**Task**  
+Capture real syscall timelines from live sessions and replay them through the same bench harnesses.
+
+**Action**  
+- Built `benchmarks/real_data_export.py` to export from the live dispatcher log / capture sessions.  
+- Committed workloads such as `benchmarks/workloads/real_captured.json` and `real_captured_concurrent.json` (`source: "real"`, syscall counts, provenance).  
+- Wired `scheduler_bench.py` / `memory_bench.py` with `--workload-source real`.  
+- Documented both paths in `benchmarks/README.md` §6 and the main README.
+
+**Result**  
+Concurrent real captures produce ready-queue contention and algorithm divergence (validation, n=1). Sequential captures can look identical across algorithms when there is no overlap — itself a useful finding. Real-data and synthetic paths are first-class, not hidden scripts.
+
+---
+
+### Challenge F — Demo UX vs kernel honesty under feature freeze
+
+**Situation**  
+After many phases, the dashboard accumulated panels (Time Travel, Gantt, health badges) that diluted the viva story and sometimes conflicted with “live kernel” messaging.
+
+**Task**  
+Polish the demo surface without adding new kernel features or overselling unfinished panels.
+
+**Action**  
+- Froze new kernel features.  
+- Sectioned the UI (kernel state / observation / workloads).  
+- Hid low-priority panels while keeping code.  
+- Collapsed terminated processes by default in process table/tree.  
+- Kept Kernel Assistant and multi-LLM driver labels visible.  
+- Migrated Groq off the retired `llama-3.1-8b-instant` model to the provider’s current recommended id after a live API break.
+
+**Result**  
+A coherent 2–5 minute demo path: Pipeline → Syscall Trace → Process Tree → Memory → Assistant → one real-bench artifact. Documentation (README, PROJECT_PLAN, this report) matches what the UI actually shows.
+
+---
+
+## 4. System overview (for graders)
 
 ```
 Agents (pipeline, assistant, …)
@@ -49,151 +158,87 @@ SyscallDispatcher.dispatch   ← single choke point
         ├── Scheduler + process tree
         ├── Memory manager (paging, swap, COW)
         ├── Access control (ACL, quotas, Banker's)
-        ├── IPC / blackboard
+        ├── IPC / blackboard / semantic FS
         └── Drivers (Groq / DeepSeek / Gemini / Ollama)
                     │
         FastAPI · Shell · Dashboard
 ```
 
-### 3.2 The syscall dispatcher (core claim)
-
-All agent–kernel work goes through `SyscallDispatcher.dispatch`:
-
-- Trap → apply **gates** (ENOSYS-before-EPERM, ACL, quotas, Banker's resource claim) → route to subsystem → record **status** and **latency_ms** → append to the syscall log.
-- Scheduling, paging, ACL, quotas, and resources are **not** separate side products; they are handlers/gates on this path.
-- Primary evidence for demos and grading: **`GET /syscalls/log`** / shell **`strace`**.
-
-### 3.3 Kernel subsystems (dispatcher routes)
-
 | Topic | Implementation |
 |--------|----------------|
-| Scheduling | FCFS, Round Robin, Priority, MLFQ (+ aging / boost variants) |
-| Memory | Paged context window; FIFO / LRU / Semantic-LRU; ChromaDB swap; COW |
+| Scheduling | FCFS, Round Robin, Priority, MLFQ (+ aging / boost) |
+| Memory | Paged context; FIFO / LRU / Semantic-LRU; ChromaDB swap; COW |
 | Access control | KERNEL vs USER ACL; page + LLM-call-rate quotas |
-| Resources / deadlock | Banker's avoidance (default) or detect/recover when off |
-| Processes | Spawn / wait / zombie / orphan / kill / kill-tree |
-| IPC / FS | Message queue, blackboard, semantic file search |
+| Resources | Banker's avoidance (default) or detect/recover |
+| Processes | Spawn / wait / zombie / orphan / kill-tree |
+| Flagship workload | Researcher → coder → tester → writer pipeline |
 
-### 3.4 Security note (required honesty)
-
-Agent identity is **caller-declared** (`agent_id` / `--agent`), not authenticated. ACL demonstrates privilege rules *given* a claimed identity. Dashboard state reads intentionally bypass syscall ACL for visibility. This is appropriate for a local course kernel and **must not** be described as production security. Pipeline code execution uses course-grade sandbox safeguards (`kernel/sandbox.py`), not a hostile-code jail.
+**Identity honesty:** agent `agent_id` is caller-declared, not authenticated. ACL demos privilege *given a claim*. Dashboard reads intentionally bypass syscall ACL for visibility. Sandbox is course-grade, not a hostile jail.
 
 ---
 
-## 4. Flagship workload: research → code → test → report
+## 5. Evaluation snapshot
 
-The multi-agent **pipeline** registers stage agents as processes and drives work through syscalls (`SPAWN`, `LLM_CALL`, `TOOL_CALL`, blackboard, FS). Stages: researcher → coder → tester → writer.
+| Evidence | Location |
+|----------|----------|
+| Synthetic scheduler / memory / Belady / starvation | `benchmarks/results/*.json`, `*.png` |
+| Real captured workloads | `benchmarks/workloads/real_captured*.json` |
+| Real-data bench outputs | `benchmarks/results/*_real*` |
+| Methods | `benchmarks/README.md` |
 
-**How this supports the course criteria:**
-
-1. **Data/info via system calls** — live `strace` / Syscall Trace shows trapped calls.  
-2. **No simulation for the live path** — real LLM providers (e.g. Groq) with measured latency; Ollama fallback when configured. (Gantt’s offline chart endpoint is an intentional exception and is hidden from the simplified dashboard.)  
-3. **Optimization with real data** — scheduler/memory benches can replay **captured** pipeline/assistant sessions (`--workload-source real`), separate from synthetic seeded profiles.
-
-The **kernel assistant** is a USER process that answers by issuing introspection/file/`LLM_CALL` syscalls (visible under each answer and in the global trace).
-
----
-
-## 5. Evaluation and results
-
-Evidence is kept in two buckets on purpose ([`benchmarks/README.md`](benchmarks/README.md)):
-
-| Kind | Purpose | Flag / artifacts |
-|------|---------|------------------|
-| Synthetic, seeded | Statistical rigor (Belady, starvation, multi-seed memory) | default; `scheduler.json`, `memory.json`, … |
-| Real captured | Practice check on live syscall timelines | `--workload-source real`; `*_real.json`, `*_real.png` |
-
-### 5.1 Scheduling (synthetic)
-
-Textbook-consistent behavior: MLFQ tends to win response time; on uniform bursts, FCFS can win wait/turnaround (preemption is overhead). Starvation under priority scheduling is demonstrated and mitigated with aging (problem → measure → fix → measure).
-
-### 5.2 Memory / Semantic-LRU (synthetic) — honest negative
-
-At n=10 seeds, **Semantic-LRU does not beat LRU** on the constructed traces. Embeddings are not inert on locality-bearing traces (beats random there), but the defensible claim is narrower than “beats LRU.” See benchmarks §2.
-
-### 5.3 Belady’s anomaly (synthetic)
-
-Capacity sweep validates stack vs non-stack behavior, including the canonical FIFO anomaly (documented in benchmarks §3).
-
-### 5.4 Real captured execution
-
-- **Sequential** capture often shows no ready-queue contention (algorithms can look identical on wait).  
-- **Concurrent** capture produces overlapping syscalls; algorithms diverge; results align with the *uniform / long-burst* side of synthetic findings for that session. Still **n=1** — cite as validation, not as a replacement for seeded tables.  
-- Real memory replay does **not** overturn “Semantic-LRU fails to beat LRU.”
-
-Artifacts: `benchmarks/workloads/real_captured*.json`, `benchmarks/results/*_real.*`.
+Highlights: MLFQ often wins response time; FCFS can win wait on uniform bursts; Semantic-LRU fails to beat LRU on constructed traces; starvation under priority is measurable and mitigated by aging; concurrent real captures validate divergence under contention.
 
 ---
 
-## 6. User surfaces
+## 6. Skills demonstrated
 
-| Surface | Role |
-|---------|------|
-| **Shell** | Primary CLI demo: `strace`, `pipeline`, `ps`/`pstree`, `mem`, `deadlock`/`mode`, `run` |
-| **Dashboard** | Live panels: process table/tree, memory, syscall trace, deadlock, pipeline, kernel assistant |
-| **Dashboard (hidden for simpler demo)** | Time Travel scrubber, Gantt (offline sim), HealthBadge — code retained |
-| **pytest / CI** | Regression coverage; Docker quickstart available |
-
-Process table/tree **collapse terminated** processes by default so demos stay readable after many pipeline runs.
+- OS internals applied to a non-traditional workload (LLM agents)  
+- Concurrent systems design (dispatcher gates, process table, resource pools)  
+- Measurement discipline (seeded benches + real capture + honest negatives)  
+- Full-stack delivery (Python kernel API, CLI shell, Next.js dashboard, CI/Docker)  
+- Engineering communication (security model, limitations, feature freeze)
 
 ---
 
-## 7. Technology stack
+## 7. Limitations
 
-Python, FastAPI, ChromaDB, Groq / DeepSeek / Gemini / Ollama, Next.js dashboard, pytest, Docker Compose. Example agent identity via [agno](https://github.com/agno-agi/agno).
-
-Default Groq model id was migrated off the retired `llama-3.1-8b-instant` to Groq’s recommended replacement (`openai/gpt-oss-20b`) after provider deprecation (Aug 2026).
-
----
-
-## 8. Project timeline (abridged)
-
-| Span | Content |
-|------|---------|
-| Phases 1–21 | Drivers → scheduler → memory → dispatcher → IPC → ACL/resources → dashboard → shell → embeddings → benches → process tree → deadlock → COW → Belady → starvation → CI/Docker → pipeline |
-| Phase 27–29 | Docs: real-kernel framing; remove unbuilt panel promises; dispatcher-first README/PROJECT_PLAN |
-| Phase 30 | Real-data export/benches, kernel assistant + dashboard chat, Groq model migration |
-| Phase 31 | Dashboard demo polish (sectioned UI, hide low-priority panels, collapse terminated) |
-
-Full commit subjects: [`PROJECT_PLAN.md`](PROJECT_PLAN.md) build roadmap / `git log --grep=Phase`.
-
----
-
-## 9. Limitations
-
-1. Caller-declared identity — not a real security boundary.  
-2. Semantic-LRU negative result (synthetic); real-data memory check is n=1.  
+1. Caller-declared identity — not a production security boundary.  
+2. Semantic-LRU negative result; real memory check is typically n=1.  
 3. Course-grade code sandbox only.  
-4. Out of scope: checkpoint/restore, multi-tenant virtual kernels, remote kernel mode.  
-5. Minor ops debt (e.g. dashboard default API port vs Docker 8000; Gemini client package deprecation).
+4. Some observability/ops endpoints read or mutate state outside `dispatch()` (documented).  
+5. Out of scope: checkpoint/restore, multi-tenant virtual kernels.
 
 ---
 
-## 10. Conclusion
+## 8. How to reproduce (viva / video)
 
-AIOS demonstrates that OS coursework can be grounded in a **live, syscall-governed LLM-agent kernel** rather than simulation-only slides. The dispatcher is the architectural center; the pipeline and assistant are workloads that exercise it; synthetic benches provide rigor; real captures check practice. The project is **feature-complete under freeze**, with documentation and demo UI aligned to that story.
-
----
-
-## 11. How to reproduce a short viva demo
-
-1. Start API + dashboard (e.g. API on port 8010 if 8000 is blocked on Windows).  
+1. Start API + dashboard (API often on **8010** if Windows blocks 8000).  
 2. Run a short **Pipeline** task; watch **Syscall Trace**, **Process Tree**, **Memory**.  
-3. Ask the **Kernel Assistant** a question; show syscall receipts.  
-4. Open one `benchmarks/results/*_real.png` (or JSON) and contrast with synthetic benches.  
-5. Optionally: shell `strace` / `pipeline` for the same evidence without the UI.
+3. Ask the **Kernel Assistant** one question; show syscall receipts.  
+4. Open one `benchmarks/results/*_real.png` (or JSON) vs a synthetic result.  
+5. Optional: shell `strace` / `pipeline`.
 
-Quickstart details: [`README.md`](README.md). Benchmark methods: [`benchmarks/README.md`](benchmarks/README.md).
-
----
-
-## 12. References
-
-1. Project README and PROJECT_PLAN (this repository).  
-2. Benchmark write-ups: `benchmarks/README.md` §§1–6.  
-3. agiresearch/AIOS — related architectural reference only.  
-4. Classic OS texts (scheduling, paging, Banker's, Belady) as mapped in the modules above.
+Details: [`README.md`](README.md). Demo script for the GitHub page video: [`docs/DEMO_VIDEO_SCRIPT.md`](docs/DEMO_VIDEO_SCRIPT.md).
 
 ---
 
-*End of report.*
+## 9. Submission mapping (portal)
+
+| Portal requirement | Deliverable |
+|--------------------|-------------|
+| Technical report (STAR challenges) | This file (`COURSE_REPORT.md`) — export to PDF if the LMS requires a file upload |
+| GitHub page (intro + 2–5 min video + skills) | **Repository README:** [mahamudul-hasan-cse/AIOS](https://github.com/mahamudul-hasan-cse/AIOS) |
+| GitHub folder | Same repository (or Download ZIP) |
+
+---
+
+## 10. References
+
+1. Repository README and PROJECT_PLAN.  
+2. `benchmarks/README.md` §§1–6.  
+3. [agiresearch/AIOS](https://github.com/agiresearch/AIOS) — architectural reference only; this codebase is original.  
+4. Classic OS texts: scheduling, paging, Banker's algorithm, Belady’s anomaly.
+
+---
+
+*End of technical report.*

@@ -76,7 +76,7 @@ def isolated_api(monkeypatch):
     m.page_manager = saved["page_manager"]
     m.assistant.dispatcher = saved["assistant_dispatcher"]
     try:
-        m.assistant.register()
+        run(m.assistant.register())
     except Exception:  # noqa: BLE001 — best-effort restore for downstream tests
         pass
 

@@ -24,8 +24,8 @@
     "accesses_per_trace": 23,
     "writes_in_trace": 199,
     "loop_working_set": null,
-    "embedder": "CachingEmbedder (nomic-embed-text, 768-dim, real learned embeddings)",
-    "embeddings_are_semantic": true,
+    "embedder": "CachingEmbedder (hashing, 256-dim, approximate, vocabulary-overlap only)",
+    "embeddings_are_semantic": false,
     "seed_varies": "no \u2014 single captured sequence, not regenerated",
     "syscall_count": 313,
     "note": "Single captured session. No multi-seed average, no constructed traces (sequential/random/looping/clustered/paraphrased). Direction of a policy comparison is reported; robustness is not."
@@ -52,10 +52,10 @@
           "per_seed_page_fault_rate": [
             0.9565
           ],
-          "avg_pages_in_ram_mean": 3.565,
-          "retrieval_accuracy_mean": 0.3913,
+          "avg_pages_in_ram_mean": 4.087,
+          "retrieval_accuracy_mean": 0.4783,
           "topic_match_rate_mean": 0.5652,
-          "distinct_pages_retrieved_mean": 19,
+          "distinct_pages_retrieved_mean": 15,
           "page_faults_mean": 22
         },
         "lru": {
@@ -74,70 +74,70 @@
           "per_seed_page_fault_rate": [
             0.9565
           ],
-          "avg_pages_in_ram_mean": 3.565,
-          "retrieval_accuracy_mean": 0.3913,
+          "avg_pages_in_ram_mean": 4.087,
+          "retrieval_accuracy_mean": 0.4783,
           "topic_match_rate_mean": 0.5652,
-          "distinct_pages_retrieved_mean": 19,
+          "distinct_pages_retrieved_mean": 15,
           "page_faults_mean": 22
         },
         "semantic_lru": {
           "page_fault_rate": {
-            "mean": 0.9565,
+            "mean": 0.913,
             "std": 0.0,
-            "min": 0.9565,
-            "max": 0.9565
+            "min": 0.913,
+            "max": 0.913
           },
           "hit_ratio": {
-            "mean": 0.0435,
+            "mean": 0.087,
             "std": 0.0,
-            "min": 0.0435,
-            "max": 0.0435
+            "min": 0.087,
+            "max": 0.087
           },
           "per_seed_page_fault_rate": [
-            0.9565
+            0.913
           ],
           "avg_pages_in_ram_mean": 3.957,
-          "retrieval_accuracy_mean": 0.3913,
+          "retrieval_accuracy_mean": 0.4783,
           "topic_match_rate_mean": 0.5652,
-          "distinct_pages_retrieved_mean": 19,
-          "page_faults_mean": 22
+          "distinct_pages_retrieved_mean": 15,
+          "page_faults_mean": 21
         },
         "random": {
           "page_fault_rate": {
-            "mean": 0.8696,
+            "mean": 0.8261,
             "std": 0.0,
-            "min": 0.8696,
-            "max": 0.8696
+            "min": 0.8261,
+            "max": 0.8261
           },
           "hit_ratio": {
-            "mean": 0.1304,
+            "mean": 0.1739,
             "std": 0.0,
-            "min": 0.1304,
-            "max": 0.1304
+            "min": 0.1739,
+            "max": 0.1739
           },
           "per_seed_page_fault_rate": [
-            0.8696
+            0.8261
           ],
-          "avg_pages_in_ram_mean": 3.435,
-          "retrieval_accuracy_mean": 0.3913,
+          "avg_pages_in_ram_mean": 4.435,
+          "retrieval_accuracy_mean": 0.4783,
           "topic_match_rate_mean": 0.5652,
-          "distinct_pages_retrieved_mean": 19,
-          "page_faults_mean": 20
+          "distinct_pages_retrieved_mean": 15,
+          "page_faults_mean": 19
         }
       },
       "semantic_vs_lru": {
         "baseline": "lru",
         "challenger": "semantic_lru",
         "metric": "page_fault_rate",
-        "mean_improvement": 0.0,
+        "mean_improvement": 0.0435,
         "std_of_paired_differences": 0.0,
-        "seeds_challenger_better": 0,
+        "seeds_challenger_better": 1,
         "seeds_challenger_worse": 0,
-        "seeds_tied": 1,
-        "margin_between_means": 0.0,
+        "seeds_tied": 0,
+        "margin_between_means": 0.0435,
         "baseline_std": 0.0,
-        "margin_exceeds_baseline_std": false,
-        "improvement_exceeds_paired_std": false
+        "margin_exceeds_baseline_std": true,
+        "improvement_exceeds_paired_std": true
       },
       "semantic_vs_random": {
         "baseline": "random",

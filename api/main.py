@@ -116,9 +116,13 @@ def _replace_queue(processes: list[Process]) -> None:
 
 
 def _seed_scheduler_demo() -> None:
-    """Seed a representative queue + Gantt timeline so the dashboard's scheduler
-    panels are populated on first load. The displayed queue is a mid-run
-    snapshot showing every state badge; the timeline is a real Round Robin run."""
+    """Bootstrap dashboard scheduler panels with a sample queue + Gantt timeline.
+
+    This is **demo/bootstrap state only** — not part of the agent execution path.
+    Processes are installed directly on ``dispatcher.scheduler.queue`` so the
+    process table is non-empty on first load. Agent workloads (pipeline,
+    assistant) register processes through ``SPAWN_AGENT`` instead.
+    """
     sample = [
         Process(pid="P1", arrival_time=0, estimated_burst=5, priority=1),
         Process(pid="P2", arrival_time=1, estimated_burst=3, priority=2),
@@ -291,7 +295,7 @@ async def lifespan(app: FastAPI):
     # answers project questions from. Best-effort: a docs-indexing failure
     # must not stop the kernel booting.
     try:
-        assistant.register()
+        await assistant.register()
         _mark_startup_step("assistant_register", "complete")
         _mark_startup_step(
             "assistant_doc_index",
@@ -479,12 +483,8 @@ def _new_process(p: "ProcessIn") -> Process:
 
 @app.post("/scheduler/gantt", response_model=GanttResponse)
 def scheduler_gantt(request: GanttRequest) -> GanttResponse:
-    processes = [_new_process(p) for p in request.processes]
-
-    # Run the simulation on throwaway copies so the processes we register keep
-    # their pre-run (schedulable) state — the scheduling algorithms mutate
-    # processes to "terminated" as they complete, and we want the live queue to
-    # represent pending processes that can still be inspected and terminated.
+    # Offline CPU-scheduling simulation on throwaway process copies. Does not
+    # mutate dispatcher.scheduler.queue — the live process table is unchanged.
     sim = Scheduler([_new_process(p) for p in request.processes])
     try:
         timeline = sim.run(
@@ -494,10 +494,6 @@ def scheduler_gantt(request: GanttRequest) -> GanttResponse:
         )
     except UnknownAlgorithmError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-
-    # Register the submitted processes into the dispatcher's scheduler — the
-    # single source of truth that /scheduler/state and /scheduler/terminate read.
-    _replace_queue(processes)
 
     timeline_out = [{"pid": s.pid, "start": s.start, "end": s.end} for s in timeline]
     scheduler_state["timeline"] = timeline_out
@@ -1094,7 +1090,7 @@ async def assistant_chat(request: AssistantChatRequest) -> AssistantChatResponse
 
 
 @app.post("/assistant/restart", response_model=AssistantStatusResponse)
-def assistant_restart() -> AssistantStatusResponse:
+async def assistant_restart() -> AssistantStatusResponse:
     """Re-register the assistant process after it has been killed."""
-    assistant.register()
+    await assistant.register()
     return assistant_status()

@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AIOS — Syscall Kernel for LLM Agents</title>
+  <meta name="description" content="AIOS (AgentOS-Lite): a course OS kernel that governs real LLM agents through system calls." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #152018;
+      --muted: #4a5a50;
+      --paper: #f3f6f2;
+      --panel: #ffffff;
+      --line: #c9d4cb;
+      --accent: #1f6b4a;
+      --accent-2: #0e3d2c;
+      --warm: #c45c26;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(1200px 600px at 10% -10%, #dce8df 0%, transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, #e8dfd4 0%, transparent 50%),
+        var(--paper);
+      line-height: 1.55;
+    }
+    a { color: var(--accent); }
+    a:hover { color: var(--accent-2); }
+    .wrap { width: min(960px, calc(100% - 2rem)); margin: 0 auto; }
+    header.hero {
+      padding: 3.5rem 0 2.25rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand {
+      font-family: "IBM Plex Serif", Georgia, serif;
+      font-weight: 700;
+      font-size: clamp(2.4rem, 6vw, 3.4rem);
+      letter-spacing: -0.02em;
+      margin: 0 0 0.35rem;
+      color: var(--accent-2);
+    }
+    .tag {
+      margin: 0;
+      max-width: 38rem;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+    .cta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.65rem 1rem;
+      border-radius: 6px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+      border: 1px solid transparent;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--accent-2); color: #fff; }
+    .btn-ghost {
+      background: var(--panel);
+      color: var(--ink);
+      border-color: var(--line);
+    }
+    section {
+      padding: 2.25rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    h2 {
+      font-family: "IBM Plex Serif", Georgia, serif;
+      font-size: 1.55rem;
+      margin: 0 0 0.75rem;
+      letter-spacing: -0.01em;
+    }
+    .lead { color: var(--muted); margin: 0 0 1.25rem; max-width: 40rem; }
+    .video-frame {
+      background: #0c1611;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #24352c;
+      aspect-ratio: 16 / 9;
+      position: relative;
+    }
+    .video-frame iframe,
+    .video-frame video {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+      background: #0c1611;
+    }
+    .video-placeholder {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-content: center;
+      text-align: center;
+      color: #d7e4db;
+      padding: 1.5rem;
+      gap: 0.5rem;
+    }
+    .video-placeholder strong { color: #fff; font-size: 1.15rem; }
+    .video-placeholder code {
+      display: inline-block;
+      margin-top: 0.5rem;
+      padding: 0.2rem 0.45rem;
+      background: #1a2a22;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .skills {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.85rem;
+    }
+    .skill {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 1rem 1.05rem;
+    }
+    .skill h3 {
+      margin: 0 0 0.35rem;
+      font-size: 0.98rem;
+    }
+    .skill p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.86rem;
+      background: #e8efe9;
+      padding: 0.85rem 1rem;
+      border-radius: 8px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+    }
+    footer {
+      padding: 2rem 0 3rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .accent-dot { color: var(--warm); }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <p class="brand">AIOS</p>
+      <p class="tag">
+        A course operating-system kernel that governs <strong>real LLM agents</strong> through
+        system calls — scheduling, paging, ACL, and deadlock handling as first-class mechanisms,
+        not slides.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="#demo">Watch demo</a>
+        <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AIOS">GitHub repository</a>
+        <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/COURSE_REPORT.md">Technical report</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="about">
+      <div class="wrap">
+        <p class="lead">
+          Prefer the <a href="https://github.com/mahamudul-hasan-cse/AIOS"><strong>GitHub repository README</strong></a>
+          as the course project page (intro + demo video + skills). This static page is optional.
+        </p>
+        <h2>Short introduction</h2>
+        <p class="lead">
+          AIOS (dashboard name <em>AgentOS-Lite</em>) maps textbook OS ideas onto multi-agent LLM
+          workloads. Every meaningful agent–kernel interaction goes through
+          <code>SyscallDispatcher.dispatch</code>. A research→code→test→report pipeline and a
+          kernel assistant exercise that path live; synthetic and real-captured benches evaluate
+          the algorithms honestly — including negative results.
+        </p>
+        <div class="mono">
+Agents → SyscallDispatcher.dispatch → Scheduler · Memory · ACL · Resources · Drivers<br />
+Evidence: Syscall Trace / shell strace · Process tree · Memory state · Bench charts
+        </div>
+      </div>
+    </section>
+
+    <section id="demo">
+      <div class="wrap">
+        <h2>Video demo <span class="accent-dot">(2–5 minutes)</span></h2>
+        <p class="lead">
+          Walkthrough of pipeline + syscall evidence + assistant + real-data bench artifact.
+          Recording script: <a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/docs/DEMO_VIDEO_SCRIPT.md">DEMO_VIDEO_SCRIPT.md</a>.
+        </p>
+        <div class="video-frame" id="player">
+          <!--
+            After you upload the demo:
+            1) YouTube/Vimeo: replace the iframe src below and remove the placeholder + local <video>.
+            2) Or commit docs/media/demo.mp4 and keep the <video> tag.
+          -->
+          <div class="video-placeholder" id="video-placeholder">
+            <strong>Demo video slot ready</strong>
+            <div>Record with the script in <code>docs/DEMO_VIDEO_SCRIPT.md</code>, then either:</div>
+            <div>Embed YouTube here, or place <code>docs/media/demo.mp4</code></div>
+          </div>
+          <!-- Uncomment after adding docs/media/demo.mp4:
+          <video controls playsinline poster="" src="media/demo.mp4"></video>
+          -->
+          <!-- Uncomment after uploading to YouTube (replace VIDEO_ID):
+          <iframe
+            src="https://www.youtube.com/embed/VIDEO_ID"
+            title="AIOS demo"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          ></iframe>
+          -->
+        </div>
+      </div>
+    </section>
+
+    <section id="skills">
+      <div class="wrap">
+        <h2>Skills this project highlights</h2>
+        <p class="lead">Built end-to-end for an Operating Systems course — systems thinking plus measurable delivery.</p>
+        <div class="skills">
+          <article class="skill">
+            <h3>OS → AI systems</h3>
+            <p>Process table, paging, syscalls, Banker's algorithm applied to LLM agents.</p>
+          </article>
+          <article class="skill">
+            <h3>Syscall discipline</h3>
+            <p>Single dispatcher choke point with ACL, quotas, and logged latency.</p>
+          </article>
+          <article class="skill">
+            <h3>Honest evaluation</h3>
+            <p>Seeded benches, real syscall captures, and documented negative Semantic-LRU results.</p>
+          </article>
+          <article class="skill">
+            <h3>Full-stack kernel demo</h3>
+            <p>FastAPI kernel, CLI shell, Next.js dashboard, CI and Docker quickstart.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="links">
+      <div class="wrap">
+        <h2>Links for graders</h2>
+        <ul>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS">Source repository (GitHub folder)</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/COURSE_REPORT.md">STAR technical report</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/README.md">README — architecture &amp; security model</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/benchmarks/README.md">Benchmarks (synthetic + real data)</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      AIOS / AgentOS-Lite · Mahamudul Hasan ·
+      <a href="https://github.com/mahamudul-hasan-cse/AIOS">github.com/mahamudul-hasan-cse/AIOS</a>
+    </div>
+  </footer>
+
+  <script>
+    // If a local demo.mp4 is present, show it and hide the placeholder.
+    (function () {
+      var v = document.createElement("video");
+      v.controls = true;
+      v.playsInline = true;
+      v.src = "media/demo.mp4";
+      v.onloadeddata = function () {
+        var ph = document.getElementById("video-placeholder");
+        var box = document.getElementById("player");
+        if (ph) ph.remove();
+        box.appendChild(v);
+      };
+      v.onerror = function () { /* keep placeholder until YouTube or file is added */ };
+    })();
+  </script>
+</body>
+</html>

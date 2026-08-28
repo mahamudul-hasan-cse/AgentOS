@@ -115,26 +115,37 @@ class KernelAssistant(KernelAgent):
 
     # --- lifecycle --------------------------------------------------------
 
-    def register(self, priority: int = 1) -> Dict[str, Any]:
-        """Register as a real process: an entry in the scheduler under init,
-        USER privilege, and its own quota. Idempotent."""
+    async def register(self, priority: int = 1) -> Dict[str, Any]:
+        """Register as a real process via SPAWN_AGENT (parent init).
+
+        Idempotent: if ``assistant`` already exists in the process table, ACL
+        is refreshed but no second spawn is attempted.
+        """
         from kernel.access_control import AgentPrivilege
 
         scheduler = self.dispatcher.scheduler
         scheduler.ensure_init()
+        # init is the hierarchy root; spawning through it matches the intended
+        # parent_pid and routes registration through the syscall trap.
+        self.dispatcher.acl.registry.register("init", AgentPrivilege.KERNEL)
+
         existing = scheduler.get(ASSISTANT_PID)
         if existing is None:
-            scheduler.spawn(
+            syscall = await self.dispatcher.dispatch(
+                "init",
+                SyscallType.SPAWN_AGENT,
                 pid=ASSISTANT_PID,
-                parent_pid="init",
+                privilege=AgentPrivilege.USER.value,
                 estimated_burst=0.0,
                 priority=priority,
             )
-        # USER, explicitly. The assistant must be as constrained as anything
-        # else -- a KERNEL-privileged assistant could read every agent's memory
-        # and the access-control demonstration would be vacuous.
-        self.dispatcher.acl.registry.register(ASSISTANT_PID, AgentPrivilege.USER)
-        # materialise its quota entry so it shows up in /quotas immediately
+            if syscall.status != SyscallStatus.SUCCESS:
+                raise RuntimeError(
+                    f"assistant SPAWN_AGENT failed: {syscall.status.value} {syscall.result}"
+                )
+        else:
+            self.dispatcher.acl.registry.register(ASSISTANT_PID, AgentPrivilege.USER)
+
         self.dispatcher.quota_manager.usage(ASSISTANT_PID)
         process = scheduler.get(ASSISTANT_PID)
         return {

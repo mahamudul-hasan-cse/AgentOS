@@ -46,7 +46,7 @@ def kernel(tmp_path):
         record_state=False,
     )
     assistant = KernelAssistant(dispatcher)
-    assistant.register()
+    run(assistant.register())
     return dispatcher, assistant
 
 
@@ -228,7 +228,7 @@ def test_terminating_the_assistant_degrades_gracefully(kernel):
     assert reply["syscalls"] == []
 
     # and it can be brought back
-    assistant.register()
+    run(assistant.register())
     assert assistant.is_alive()
 
 
@@ -263,7 +263,7 @@ def test_shell_kill_path_takes_the_assistant_down_and_status_reports_it():
             assert restarted["alive"] is True
         finally:
             # leave the module-level app usable for any other test
-            app_assistant.register()
+            run(app_assistant.register())
 
 
 def test_health_reports_startup_state_without_waiting_for_doc_index(monkeypatch):
