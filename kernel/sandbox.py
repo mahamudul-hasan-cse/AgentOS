@@ -75,28 +75,44 @@ def _validate_python(code: str) -> List[str]:
     return violations
 
 
+_BLOCKED_ENV_EXACT = {
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "VIRTUAL_ENV",
+    "CONDA_PREFIX",
+    "AGENTOS_CONFIG",
+    "AIOS_CONFIG",
+}
+_BLOCKED_ENV_PREFIXES = (
+    "AGENTOS_",
+    "AIOS_",
+    "GROQ_",
+    "GEMINI_",
+    "OPENAI_",
+    "AWS_",
+    "AZURE_",
+    "GOOGLE_API_",
+)
+
+
 def _sandbox_subprocess_env() -> Dict[str, str]:
     """Environment for the isolated child interpreter.
 
-    ``-I`` ignores inherited variables, so we pass an explicit minimal set.
-    Python 3.10 (notably on Windows, and some Linux CI images) can fail to
-    start with only UTF-8 flags unless hash-seed and OS bootstrap vars exist.
+    ``-I`` ignores PYTHON* injection, but the child still needs OS bootstrap
+    variables (PATH, HOME, SYSTEMROOT, etc.). A stripped env breaks Python 3.10
+    startup on Windows and some Linux CI images.
     """
-    env: Dict[str, str] = {
-        "PYTHONIOENCODING": "utf-8",
-        "PYTHONUTF8": "1",
-        "PYTHONHASHSEED": "0",
-    }
-    if os.name == "nt":
-        for key in ("SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "USERPROFILE"):
-            value = os.environ.get(key)
-            if value:
-                env[key] = value
-    else:
-        for key in ("HOME", "PATH", "LANG", "LC_ALL", "TMPDIR"):
-            value = os.environ.get(key)
-            if value:
-                env[key] = value
+    env: Dict[str, str] = {}
+    for key, value in os.environ.items():
+        upper = key.upper()
+        if upper in _BLOCKED_ENV_EXACT:
+            continue
+        if any(upper.startswith(prefix) for prefix in _BLOCKED_ENV_PREFIXES):
+            continue
+        env[key] = value
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env.setdefault("PYTHONHASHSEED", "0")
     return env
 
 
@@ -214,8 +230,9 @@ def _kill_process_tree(proc: subprocess.Popen) -> Dict[str, Any]:
         }
 
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
-        return {"method": "os.killpg(SIGKILL)", "pid": proc.pid, "ok": True}
+        pgid = os.getpgid(proc.pid)
+        os.killpg(pgid, signal.SIGKILL)
+        return {"method": "os.killpg(SIGKILL)", "pid": proc.pid, "pgid": pgid, "ok": True}
     except ProcessLookupError:
         return {"method": "os.killpg(SIGKILL)", "pid": proc.pid, "ok": True}
     except OSError as exc:
