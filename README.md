@@ -3,6 +3,10 @@
 **An Operating-System-Inspired Kernel for Governing LLM Agent Execution Through System Calls**
 
 [![tests](https://github.com/mahamudul-hasan-cse/AgentOS/actions/workflows/tests.yml/badge.svg)](https://github.com/mahamudul-hasan-cse/AgentOS/actions/workflows/tests.yml)
+![Ollama](https://img.shields.io/badge/Ollama-Local%20AI-FF6B35?style=flat)
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat&logo=python&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat&logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat)
 
 Repository: [github.com/mahamudul-hasan-cse/AgentOS](https://github.com/mahamudul-hasan-cse/AgentOS)
 Demo video: [youtu.be/_xuCx_x_UAk](https://youtu.be/_xuCx_x_UAk?si=XVaim9Wd8m7KUAhq)
@@ -201,3 +205,10 @@ python -m benchmarks.scheduler_bench --workload-source real
 
 Python · FastAPI · Groq / DeepSeek / Gemini / Ollama · ChromaDB · Next.js · agno
 
+## 👤 Author
+
+**Md. Mahamudul Hasan**
+
+- GitHub: [@mahamudul-hasan-cse](https://github.com/mahamudul-hasan-cse)
+
+---
