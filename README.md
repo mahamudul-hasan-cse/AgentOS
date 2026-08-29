@@ -8,8 +8,8 @@ Repository: [github.com/mahamudul-hasan-cse/AgentOS](https://github.com/mahamudu
 Demo video: [youtu.be/_xuCx_x_UAk](https://youtu.be/_xuCx_x_UAk?si=XVaim9Wd8m7KUAhq)
 Technical report: *[add PDF/link here]*
 
-<!-- Drop file: docs/images/dashboard-kernel-state.png -->
-![AgentOS dashboard — process table, process tree, memory paging, live syscall trace, and deadlock detection](docs/images/dashboard-kernel-state.png)
+![Dashboard](docs/images/dashboard-kernel-state.png)
+
 *Live kernel state: a real process tree, memory pages moving between RAM and ChromaDB swap, and every syscall logged in real time. 2,422 background deadlock scans, 8 real recoveries — Banker's Algorithm and detection both exercised live, not staged.*
 
 ---
@@ -23,8 +23,8 @@ AgentOS is an Operating Systems course project where **AI agents are processes**
 - **Optimized with real data.** Every benchmark runs two ways — seeded synthetic workloads for statistical rigor, and separately on real data captured from actual live sessions — reported separately, never mixed.
 - **Honest about its own limits**, including one negative result: an original memory-eviction algorithm I designed was tested rigorously and did **not** outperform the standard baseline. That result is reported, not hidden.
 
-<!-- Drop file: docs/images/pipeline-and-assistant.png -->
-![Pipeline and kernel assistant panels — a real 4-agent research-code-test-report run, and a chat assistant that answers by issuing its own syscalls](docs/images/pipeline-and-assistant.png)
+![Pipeline and assistant](docs/images/pipeline-and-assistant.png)
+
 *The flagship workload: four agents (researcher → coder → tester → writer) actually write and execute code end to end. The kernel assistant on the right answers questions by issuing real `PROC_LIST`/`FILE_SEARCH`/`LLM_CALL` syscalls — every answer shows exactly which calls produced it.*
 
 ---
