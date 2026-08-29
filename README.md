@@ -15,7 +15,7 @@ Technical report: *[[AgentOS_Report.pdf](https://github.com/user-attachments/fil
 
 ---
 
-## TL;DR
+## TL;DR (Too Long; Didn't Read)
 
 AgentOS is an Operating Systems course project where **AI agents are processes**, governed entirely through **system calls**. No agent ever calls an LLM, touches memory, or reads a file directly — every action is trapped by a single dispatcher, checked for permission and quota, logged, and only then executed for real.
 
