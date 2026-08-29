@@ -4,7 +4,7 @@
 
 [![tests](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml/badge.svg)](https://github.com/mahamudul-hasan-cse/AIOS/actions/workflows/tests.yml)
 
-Repository: [github.com/mahamudul-hasan-cse/AIOS](https://github.com/mahamudul-hasan-cse/AIOS) *(GitHub folder name; project name is **AgentOS**)*
+Repository: [github.com/mahamudul-hasan-cse/AIOS](https://github.com/mahamudul-hasan-cse/AIOS) 
 
 AgentOS is a course project that applies classic operating-system ideas to multi-agent LLM workloads. Agents do not call kernel subsystems directly; they issue **system calls** trapped by `SyscallDispatcher.dispatch`, which enforces ACL, quotas, and resource gates, routes to the owning subsystem, and logs every outcome.
 
