@@ -1,10 +1,22 @@
+# Python
 venv/
+.venv*/
+.pytest_cache/
 __pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Secrets / local config
 kernel/config.yaml
 .env
+
+# Runtime kernel state (created on first run)
 chroma_db/
 fs_root/
 
-# dashboard (Next.js)
+# Dashboard (Next.js)
 dashboard/node_modules/
 dashboard/.next/
+dashboard/tsconfig.tsbuildinfo
+dashboard/.env*.local

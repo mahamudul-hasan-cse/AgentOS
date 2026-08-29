@@ -2,7 +2,7 @@
 
 > **Status:** Phases **1–31** are committed in `git log`. Phase numbers follow commit messages (no Phase 8 tag — sequence jumps from 7 to 9).
 >
-> Project name: **AgentOS**. GitHub repository folder: `mahamudul-hasan-cse/AIOS`.
+> Project name: **AgentOS**. GitHub repository: [`mahamudul-hasan-cse/AgentOS`](https://github.com/mahamudul-hasan-cse/AgentOS).
 
 ---
 
@@ -125,7 +125,7 @@ Each row is a **subsystem the dispatcher routes to** (see §4), not an independe
 | IPC | `kernel/ipc/` | Message queue + blackboard |
 | Semantic FS | `kernel/filesystem/` | Per-agent files + embedding search |
 
-Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is reported by `GET /health` (HealthBadge UI is hidden on the dashboard for a simpler demo).
+Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is reported by `GET /health`.
 
 ---
 
@@ -150,8 +150,8 @@ Thin surfaces over the kernel state in §§4–6. Prefer shell `strace` / `pipel
 | Surface | Best for |
 |---------|----------|
 | **Shell** (`shell/repl.py`) | ACL/permission demo (`--agent mallory`), deadlock toggle, `pipeline <task>`, `strace` |
-| **Dashboard** (`dashboard/`) | Live visual demo: process/memory/syscall/deadlock/pipeline + kernel assistant (Time Travel, Gantt, HealthBadge hidden) |
-| **Time travel** (`kernel/replay/`) | Ring-buffer snapshots; scrubber UI is the veneer |
+| **Dashboard** (`dashboard/`) | Live visual demo: process table/tree, memory, syscall trace, deadlock, pipeline, kernel assistant |
+| **Replay** (`kernel/replay/`) | Ring-buffer snapshots for benchmarks and `GET /replay/*` (not a dashboard panel) |
 | **pytest** | Regression proof (151 tests) |
 | **Benchmarks** | Report-grade algorithm measurements |
 
@@ -222,6 +222,7 @@ Phase titles below are copied from **`git log --grep=Phase`** commit subjects. T
 
 ```
 AgentOS/
+├── .github/workflows/      # CI: pytest 3.10/3.11 + dashboard build
 ├── kernel/
 │   ├── scheduler/          # algorithms.py, scheduler.py
 │   ├── memory/             # page_manager.py, replacement.py, embeddings.py
@@ -231,13 +232,17 @@ AgentOS/
 │   ├── access_control/     # acl, quotas, resource_manager, deadlock_detector
 │   ├── filesystem/         # semantic_fs.py
 │   ├── replay/             # recorder.py
-│   └── sandbox.py
+│   ├── sandbox.py
+│   └── config.yaml.example
 ├── agents/                 # pipeline.py, kernel_assistant.py, example_agents.py
-├── api/                    # main.py
-├── shell/                  # repl.py, README.md
+├── api/                    # FastAPI kernel HTTP surface
+├── shell/                  # REPL over the HTTP API
 ├── dashboard/              # Next.js App Router UI
-├── benchmarks/             # evaluation suites + results/
-├── tests/                  # pytest
+├── benchmarks/             # suites, workloads/, results/
+├── tests/                  # pytest (151 cases)
+├── docs/                   # optional static page + README screenshots
+├── docker-compose.yml
+├── Dockerfile
 ├── PROJECT_PLAN.md
 └── README.md
 ```
@@ -258,5 +263,5 @@ AgentOS/
 ## 12. Notes
 
 - Free-tier API limits change; verify provider consoles before demos.
-- Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is reported by `GET /health` (HealthBadge UI is hidden on the dashboard for a simpler demo).
+- Provider rate-limit **pools** are visible via shell `top` / `GET /resources/state` (no dashboard panel). Embedding health is reported by `GET /health`.
 - Course write-up is maintained separately from this repo; use [`README.md`](README.md) and [`benchmarks/README.md`](benchmarks/README.md) as the in-repo evidence package.

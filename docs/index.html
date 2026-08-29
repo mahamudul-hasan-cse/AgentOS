@@ -172,9 +172,9 @@
         not slides.
       </p>
       <div class="cta">
-        <a class="btn btn-primary" href="https://github.com/mahamudul-hasan-cse/AIOS#13-how-to-run">Run locally</a>
-        <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AIOS">GitHub repository</a>
-        <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/README.md">Project README</a>
+        <a class="btn btn-primary" href="https://github.com/mahamudul-hasan-cse/AgentOS#5-how-to-run">Run locally</a>
+        <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AgentOS">GitHub repository</a>
+        <a class="btn btn-ghost" href="https://github.com/mahamudul-hasan-cse/AgentOS/blob/main/README.md">Project README</a>
       </div>
     </div>
   </header>
@@ -183,7 +183,7 @@
     <section id="about">
       <div class="wrap">
         <p class="lead">
-          Prefer the <a href="https://github.com/mahamudul-hasan-cse/AIOS"><strong>GitHub repository README</strong></a>
+          Prefer the <a href="https://github.com/mahamudul-hasan-cse/AgentOS"><strong>GitHub repository README</strong></a>
           as the course project page (architecture, syscall evidence, benchmarks, how to run). This static page is optional.
         </p>
         <h2>Short introduction</h2>
@@ -207,17 +207,15 @@ Evidence: Syscall Trace / shell strace · Process tree · Memory state · Bench 
         <p class="lead">
           Run the kernel locally, then exercise the flagship pipeline, syscall trace, kernel assistant, and real-data benches.
           Step-by-step commands are in the
-          <a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/README.md#13-how-to-run">README — How to run</a>.
+          <a href="https://github.com/mahamudul-hasan-cse/AgentOS/blob/main/README.md#5-how-to-run">README — How to run</a>.
         </p>
         <div class="video-frame" id="player">
-          <div class="video-placeholder" id="video-placeholder">
-            <strong>Interactive demo</strong>
-            <div>Start API + dashboard, run <code>pipeline</code> from the shell, and inspect syscall logs in the UI.</div>
-            <div>Optional: commit <code>docs/media/demo.mp4</code> or embed a YouTube iframe here.</div>
-          </div>
-          <!-- Uncomment after adding docs/media/demo.mp4:
-          <video controls playsinline poster="" src="media/demo.mp4"></video>
-          -->
+          <iframe
+            src="https://www.youtube.com/embed/_xuCx_x_UAk"
+            title="AgentOS demo"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowfullscreen
+          ></iframe>
         </div>
       </div>
     </section>
@@ -251,10 +249,10 @@ Evidence: Syscall Trace / shell strace · Process tree · Memory state · Bench 
       <div class="wrap">
         <h2>Links for graders</h2>
         <ul>
-          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS">Source repository (GitHub folder)</a></li>
-          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/README.md">README — architecture, course requirements &amp; security model</a></li>
-          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/PROJECT_PLAN.md">PROJECT_PLAN — phase history &amp; blueprint</a></li>
-          <li><a href="https://github.com/mahamudul-hasan-cse/AIOS/blob/main/benchmarks/README.md">Benchmarks (synthetic + real data)</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AgentOS">Source repository</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AgentOS/blob/main/README.md">README — architecture, course requirements &amp; security model</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AgentOS/blob/main/PROJECT_PLAN.md">PROJECT_PLAN — phase history &amp; blueprint</a></li>
+          <li><a href="https://github.com/mahamudul-hasan-cse/AgentOS/blob/main/benchmarks/README.md">Benchmarks (synthetic + real data)</a></li>
         </ul>
       </div>
     </section>
@@ -263,25 +261,9 @@ Evidence: Syscall Trace / shell strace · Process tree · Memory state · Bench 
   <footer>
     <div class="wrap">
       AgentOS · Mahamudul Hasan ·
-      <a href="https://github.com/mahamudul-hasan-cse/AIOS">github.com/mahamudul-hasan-cse/AIOS</a>
+      <a href="https://github.com/mahamudul-hasan-cse/AgentOS">github.com/mahamudul-hasan-cse/AgentOS</a>
     </div>
   </footer>
 
-  <script>
-    // If a local demo.mp4 is present, show it and hide the placeholder.
-    (function () {
-      var v = document.createElement("video");
-      v.controls = true;
-      v.playsInline = true;
-      v.src = "media/demo.mp4";
-      v.onloadeddata = function () {
-        var ph = document.getElementById("video-placeholder");
-        var box = document.getElementById("player");
-        if (ph) ph.remove();
-        box.appendChild(v);
-      };
-      v.onerror = function () { /* keep placeholder until YouTube or file is added */ };
-    })();
-  </script>
 </body>
 </html>
