@@ -15,7 +15,7 @@ Technical report: *[[AgentOS_Report.pdf](https://github.com/user-attachments/fil
 
 ---
 
-## TL;DR (Too Long; Didn't Read)
+## Overview
 
 AgentOS is an Operating Systems course project where **AI agents are processes**, governed entirely through **system calls**. No agent ever calls an LLM, touches memory, or reads a file directly — every action is trapped by a single dispatcher, checked for permission and quota, logged, and only then executed for real.
 
@@ -30,7 +30,7 @@ AgentOS is an Operating Systems course project where **AI agents are processes**
 
 ---
 
-## 1. The Problem This Addresses
+## 1. Problem Statement
 
 Multi-agent LLM applications are usually orchestrated at the application layer — memory access, tool execution, resource limits, and agent lifecycle scattered across ad-hoc code with no single place enforcing permission, quotas, or logging consistently.
 
@@ -193,10 +193,17 @@ python -m benchmarks.scheduler_bench --workload-source real
 - [`benchmarks/README.md`](benchmarks/README.md) — full benchmark methodology and result tables
 - [`shell/README.md`](shell/README.md) — shell command reference
 
+## Thumb nail
+- **An OS for AI Agent 
+<img width="1280" height="720" alt="AgentOS-Lite_YouTube_Thumbnail" src="https://github.com/user-attachments/assets/48aba414-8e5c-49ff-8f36-b80ab84a7bcb" />
+
+
 ## Tech Stack
 
-Python, FastAPI, Groq / DeepSeek / Gemini / Ollama, ChromaDB, Next.js, agno.
+Python
+FastAPI
+Groq / DeepSeek / Gemini / Ollama
+ChromaDB
+Next.js
+agno
 
-## Acknowledgements
-
-Architecturally inspired by [agiresearch/AIOS](https://github.com/agiresearch/AIOS) as a reference point; independently designed and implemented.
