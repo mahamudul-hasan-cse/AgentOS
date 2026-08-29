@@ -6,7 +6,8 @@
 
 Repository: [github.com/mahamudul-hasan-cse/AgentOS](https://github.com/mahamudul-hasan-cse/AgentOS)
 Demo video: [youtu.be/_xuCx_x_UAk](https://youtu.be/_xuCx_x_UAk?si=XVaim9Wd8m7KUAhq)
-Technical report: *[add PDF/link here]*
+Technical report: *[[AgentOS_Report.pdf](https://github.com/user-attachments/files/31603179/AgentOS_Report.pdf)
+]*
 
 ![Dashboard](docs/images/dashboard-kernel-state.png)
 
