@@ -193,17 +193,11 @@ python -m benchmarks.scheduler_bench --workload-source real
 - [`benchmarks/README.md`](benchmarks/README.md) — full benchmark methodology and result tables
 - [`shell/README.md`](shell/README.md) — shell command reference
 
-## Thumb nail
-- **An OS for AI Agent 
-<img width="1280" height="720" alt="AgentOS-Lite_YouTube_Thumbnail" src="https://github.com/user-attachments/assets/48aba414-8e5c-49ff-8f36-b80ab84a7bcb" />
+## Thumbnail
 
+<img width="1280" height="720" alt="AgentOS — An OS for AI Agents" src="https://github.com/user-attachments/assets/48aba414-8e5c-49ff-8f36-b80ab84a7bcb" />
 
 ## Tech Stack
 
-Python
-FastAPI
-Groq / DeepSeek / Gemini / Ollama
-ChromaDB
-Next.js
-agno
+Python · FastAPI · Groq / DeepSeek / Gemini / Ollama · ChromaDB · Next.js · agno
 
