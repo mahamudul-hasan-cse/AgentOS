@@ -1,16 +1,11 @@
 import { API_BASE } from "@/lib/api";
 import { Chat } from "@/components/Chat";
 import { Deadlock } from "@/components/Deadlock";
-// Hidden for a simpler demo — code kept in components/:
-// import { GanttChart } from "@/components/GanttChart";
-// import { HealthBadge } from "@/components/HealthBadge";
-// import { TimeTravel } from "@/components/TimeTravel";
 import { MemoryView } from "@/components/MemoryView";
 import { Pipeline } from "@/components/Pipeline";
 import { ProcessTable } from "@/components/ProcessTable";
 import { ProcessTree } from "@/components/ProcessTree";
 import { SyscallTrace } from "@/components/SyscallTrace";
-import { TimeTravelProvider } from "@/components/TimeTravelContext";
 
 function Section({
   title,
@@ -57,44 +52,41 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Provider kept for ProcessTable/MemoryView hooks; scrubber UI stays hidden. */}
-      <TimeTravelProvider>
-        <Section title="Kernel state" hint="active processes only · terminated collapsed">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
-            <div className="min-h-[180px] max-h-[340px]">
-              <ProcessTable />
-            </div>
-            <div className="min-h-[180px] max-h-[340px]">
-              <ProcessTree />
-            </div>
+      <Section title="Kernel state" hint="active processes only · terminated collapsed">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
+          <div className="min-h-[180px] max-h-[340px]">
+            <ProcessTable />
           </div>
-        </Section>
+          <div className="min-h-[180px] max-h-[340px]">
+            <ProcessTree />
+          </div>
+        </div>
+      </Section>
 
-        <Section title="Observation" hint="memory · syscalls · deadlock">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:items-stretch">
-            <div className="min-h-[240px]">
-              <MemoryView />
-            </div>
-            <div className="min-h-[240px]">
-              <SyscallTrace />
-            </div>
-            <div className="min-h-[240px] md:col-span-2 xl:col-span-1">
-              <Deadlock />
-            </div>
+      <Section title="Observation" hint="memory · syscalls · deadlock">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:items-stretch">
+          <div className="min-h-[240px]">
+            <MemoryView />
           </div>
-        </Section>
+          <div className="min-h-[240px]">
+            <SyscallTrace />
+          </div>
+          <div className="min-h-[240px] md:col-span-2 xl:col-span-1">
+            <Deadlock />
+          </div>
+        </div>
+      </Section>
 
-        <Section title="Workloads" hint="pipeline + kernel assistant">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
-            <div className="min-h-[420px]">
-              <Pipeline />
-            </div>
-            <div className="min-h-[420px]">
-              <Chat />
-            </div>
+      <Section title="Workloads" hint="pipeline + kernel assistant">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
+          <div className="min-h-[420px]">
+            <Pipeline />
           </div>
-        </Section>
-      </TimeTravelProvider>
+          <div className="min-h-[420px]">
+            <Chat />
+          </div>
+        </div>
+      </Section>
     </main>
   );
 }

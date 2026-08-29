@@ -4,18 +4,15 @@ import { fetchSchedulerState } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { useMemo, useState } from "react";
 import { Panel, StateBadge } from "./Panel";
-import { HistoryBadge, useTimeTravel } from "./TimeTravelContext";
 
 /** How many recent terminated rows to preview when expanded. */
 const TERMINATED_PREVIEW = 3;
 
 export function ProcessTable() {
   const { data, error } = usePolling(fetchSchedulerState, 2000);
-  const { isLive, snapshot } = useTimeTravel();
   const [showTerminated, setShowTerminated] = useState(false);
 
-  const processes = isLive ? data?.processes ?? [] : snapshot?.processes ?? [];
-  const showError = isLive && error;
+  const processes = data?.processes ?? [];
 
   const { active, terminated } = useMemo(() => {
     const active = processes.filter((p) => p.state !== "terminated");
@@ -35,22 +32,15 @@ export function ProcessTable() {
   return (
     <Panel
       title="Process Table"
-      subtitle={
-        isLive
-          ? data?.algorithm
-            ? `algorithm: ${data.algorithm}`
-            : "—"
-          : "historical"
-      }
+      subtitle={data?.algorithm ? `algorithm: ${data.algorithm}` : "—"}
     >
-      {!isLive && <HistoryBadge label={snapshot?.label} />}
-      {showError && (
+      {error && (
         <p className="text-xs text-rose-400">backend unreachable: {error}</p>
       )}
-      {!showError && active.length === 0 && terminated.length === 0 && (
+      {!error && active.length === 0 && terminated.length === 0 && (
         <p className="text-xs text-slate-500">no processes in the queue</p>
       )}
-      {!showError && (active.length > 0 || showTerminated) && (
+      {!error && (active.length > 0 || showTerminated) && (
         <table className="w-full text-left text-sm">
           <thead className="text-xs uppercase tracking-wider text-slate-500">
             <tr>

@@ -5,11 +5,8 @@ import { useState } from "react";
 import { fetchMemoryState, MemoryPage } from "@/lib/api";
 import { usePolling } from "@/lib/usePolling";
 import { Panel } from "./Panel";
-import { HistoryBadge, useTimeTravel } from "./TimeTravelContext";
 
 function PageCard({ page, tone }: { page: MemoryPage; tone: "ram" | "swap" }) {
-  // A copy-on-write SHARED page is styled distinctly from a private one: it
-  // occupies no memory of its own, so it reads as "borrowed" rather than owned.
   const shared = Boolean(page.shared);
   const border = shared
     ? "border-violet-500/50"
@@ -98,19 +95,11 @@ export function MemoryView() {
     2000,
     agentId
   );
-  const { isLive, snapshot } = useTimeTravel();
 
-  // in history mode, pull this agent's memory out of the snapshot
-  const historical = snapshot?.memory?.[agentId];
-  const ramPages: MemoryPage[] = isLive
-    ? data?.ram_pages ?? []
-    : historical?.ram_pages ?? [];
-  const swappedPages: MemoryPage[] = isLive
-    ? data?.swapped_pages ?? []
-    : historical?.swapped_pages ?? [];
-  const tokensUsed = isLive ? data?.ram_tokens_used : historical?.ram_tokens_used;
-  const tokenBudget = isLive ? data?.ram_budget_tokens : historical?.ram_budget_tokens;
-  const hasData = isLive ? Boolean(data) : Boolean(historical);
+  const ramPages = data?.ram_pages ?? [];
+  const swappedPages = data?.swapped_pages ?? [];
+  const tokensUsed = data?.ram_tokens_used;
+  const tokenBudget = data?.ram_budget_tokens;
 
   return (
     <Panel
@@ -121,9 +110,7 @@ export function MemoryView() {
           : "—"
       }
     >
-      {!isLive && <HistoryBadge label={snapshot?.label} />}
-
-      {isLive && <CowMetrics cow={data?.cow} global_={data?.cow_global} />}
+      <CowMetrics cow={data?.cow} global_={data?.cow_global} />
 
       <div className="mb-3 flex items-center gap-2">
         <label className="text-xs text-slate-500">agent_id</label>
@@ -135,12 +122,7 @@ export function MemoryView() {
         />
       </div>
 
-      {isLive && error && <p className="text-xs text-rose-400">error: {error}</p>}
-      {!isLive && !historical && (
-        <p className="text-xs text-slate-500">
-          agent &apos;{agentId}&apos; had no memory at this point in history
-        </p>
-      )}
+      {error && <p className="text-xs text-rose-400">error: {error}</p>}
 
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -151,7 +133,7 @@ export function MemoryView() {
             {ramPages.map((p) => (
               <PageCard key={p.page_id} page={p} tone="ram" />
             ))}
-            {hasData && ramPages.length === 0 && (
+            {data && ramPages.length === 0 && (
               <p className="text-xs text-slate-600">empty</p>
             )}
           </div>
@@ -164,7 +146,7 @@ export function MemoryView() {
             {swappedPages.map((p) => (
               <PageCard key={p.page_id} page={p} tone="swap" />
             ))}
-            {hasData && swappedPages.length === 0 && (
+            {data && swappedPages.length === 0 && (
               <p className="text-xs text-slate-600">empty</p>
             )}
           </div>
